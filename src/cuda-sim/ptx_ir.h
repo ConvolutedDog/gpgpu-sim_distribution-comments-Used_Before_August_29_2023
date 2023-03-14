@@ -1251,12 +1251,14 @@ class ptx_instruction : public warp_inst_t {
   int get_wmma_layout(int index) const {
     return m_wmma_layout[index];  // 0->Matrix D,1->Matrix C
   }
-  //
+  //指令字符串只有一个操作数时，直接用get_type()获取即可。
   int get_type() const {
     assert(!m_scalar_type.empty());
     return m_scalar_type.front();
   }
-
+  //例如指令：cvt.frnd2{.relu}.f16x2.f32  d, a, b; 是将FP32类型的源操作数a和b转换为两个FP16类型，并
+  //将a转换成的数据放到高16位，将b转换成的数据放到低16位，打包成一个数据放到目的地址d。因此，需要获取指
+  //令字符串的第二个操作类型，使用get_type2()来获取。
   int get_type2() const {
     assert(m_scalar_type.size() == 2);
     return m_scalar_type.back();
