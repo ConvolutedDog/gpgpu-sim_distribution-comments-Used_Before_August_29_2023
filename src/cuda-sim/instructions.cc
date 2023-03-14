@@ -1946,7 +1946,6 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
   const operand_info &dst = pI->operand_lookup(0);
 
   if (core->get_gpu()->is_functional_sim()){
-    printf("mma_impl: inst.warp_id_func()=%d, tid=%d\n", core->get_warp_size(), tid);
     tid = inst.warp_id_func() * core->get_warp_size();
   }else
     tid = inst.warp_id() * core->get_warp_size();
