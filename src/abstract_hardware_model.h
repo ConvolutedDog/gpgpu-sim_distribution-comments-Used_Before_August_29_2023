@@ -1434,11 +1434,19 @@ class checkpoint {
   void store_global_mem(class memory_space *mem, char *fname, char *format);
   unsigned radnom;
 };
+
 /*
- * This abstract class used as a base for functional and performance and
- * simulation, it has basic functional simulation data structures and
- * procedures.
- */
+This abstract class used as a base for functional and performance and
+simulation, it has basic functional simulation data structures and
+procedures.
+*/
+/*
+这个抽象类用作功能和性能仿真的基础，它具有基本的功能仿真数据结构和过程。内核的抽象基类，用于功能和性
+能模型。shader_core_ctx（在时序模型中实现SIMT Core的类）来源于这个类。抽象类core_t拥有指令执行功能
+上所需的最基本的数据结构和程序。这个类是shader_core_ctx和functionalSimCore的基类，这两个类分别用于
+性能模拟和纯功能模拟。core_t最重要的成员是simt_stack和ptx_thread_info类型的对象，它们在功能模拟中
+用于跟踪warp分支分歧和处理线程的指令执行。
+*/
 class core_t {
  public:
   core_t(gpgpu_sim *gpu, kernel_info_t *kernel, unsigned warp_size,
