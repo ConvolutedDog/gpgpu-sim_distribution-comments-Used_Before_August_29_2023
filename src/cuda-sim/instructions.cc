@@ -1945,7 +1945,6 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
   int tid;
   //operand_lookup(n)功能为传入参数 n，返回操作数列表 m_operands 中的第 n 个操作数。
   const operand_info &dst = pI->operand_lookup(0);
-  printf("inst.warp_id_func(): %d\n.", inst.warp_id_func());
   if (core->get_gpu()->is_functional_sim()){
     //tid是当前指令所在的warp内的首个线程的编号，该编号=warp_id*32。但是在功能仿真过程中，由于是对所有
     //warp的指令循环即可，就简单地将所有线程都放在第 0 个warp上，即inst.warp_id_func()=0=tid。
