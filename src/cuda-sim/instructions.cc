@@ -1938,27 +1938,37 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
   //时为 B 矩阵。
   unsigned a_layout = pI->get_wmma_layout(0);
   unsigned b_layout = pI->get_wmma_layout(1);
-  //
+  //获取 C、D 矩阵的浮点类型，包括FP32和FP16等。get_type()获取A/B矩阵的数据类型，get_type2()获取C矩阵
+  //的数据类型。
   unsigned type = pI->get_type();
   unsigned type2 = pI->get_type2();
   int tid;
   //operand_lookup(n)功能为传入参数 n，返回操作数列表 m_operands 中的第 n 个操作数。
   const operand_info &dst = pI->operand_lookup(0);
-
+  printf("inst.warp_id_func(): %d\n.", inst.warp_id_func());
   if (core->get_gpu()->is_functional_sim()){
+    //tid是当前指令所在的warp内的首个线程的编号，该编号=warp_id*32。但是在功能仿真过程中，由于是对所有
+    //warp的指令循环即可，就简单地将所有线程都放在第 0 个warp上，即inst.warp_id_func()=0=tid。
     tid = inst.warp_id_func() * core->get_warp_size();
   }else
+    //tid是当前指令所在的warp内的首个线程的编号，该编号=warp_id*32。在性能仿真过程中，warp_id不全为零。
     tid = inst.warp_id() * core->get_warp_size();
   float temp;
   half temp2;
 
+  //对一个 warp 内的所有线程循环，该循环中主要处理的是数据的提取。
   for (thrd = 0; thrd < core->get_warp_size(); thrd++) {
+    //对于一个 warp 内的所有线程，它的[实际编号] = [当前指令所在的warp内的首个线程的编号] + thrd。
     thread = core->get_thread_info()[tid + thrd];
     if (core->get_gpu()->gpgpu_ctx->debug_tensorcore)
       printf("THREAD=%d\n:", thrd);
+    //操作数operand_num为1时，代表矩阵A；为2时，代表矩阵B；为3时，代表矩阵C。
     for (int operand_num = 1; operand_num <= 3; operand_num++) {
+      //operand_lookup函数：传入参数 n，返回操作数列表 m_operands 中的第 n 个操作数。
       const operand_info &src_a = pI->operand_lookup(operand_num);
+      //返回src_a中的数据总个数。
       unsigned nelem = src_a.get_vect_nelem();
+      //向量存储操作数，v的每一个元素都是无符号32位。
       ptx_reg_t v[8];
       thread->get_vector_operand_values(src_a, v, nelem);
       if (core->get_gpu()->gpgpu_ctx->debug_tensorcore) {
@@ -1968,9 +1978,12 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
         }
         printf("\n");
       }
+      //前面的处理是将操作数数据放到了v[8]中，v的每一个元素都是无符号32位，而当矩阵为FP16数据类型时，就
+      //需要将v中的每一个元素分隔开，分成两个FP16数据类型，存放到nw_v[16]中。
       ptx_reg_t nw_v[16];
       int hex_val;
-
+      //第3操作数为C矩阵，其数据类型为type2，下面判断的是C矩阵为FP16数据类型。将v[8]数据中的高位放前一
+      //个元素；将v[8]数据中的低位放后一个元素。（第0操作数为D矩阵）
       if (!((operand_num == 3) && (type2 == F32_TYPE))) {
         for (k = 0; k < 2 * nelem; k++) {
           if (k % 2 == 1)
@@ -1980,6 +1993,8 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
           nw_v[k].f16 = *((half *)&hex_val);
         }
       }
+      //第3操作数为C矩阵，其数据类型为type2，下面判断的是C矩阵为FP16数据类型。下面DEBUG用。（第0操作数
+      //为D矩阵）
       if (!((operand_num == 3) && (type2 == F32_TYPE))) {
         for (k = 0; k < 2 * nelem; k++) {
           temp = nw_v[k].f16;
@@ -1995,6 +2010,8 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
           printf("\n");
         }
       }
+      //对三个操作数分别操作，主要处理的是，将上述 nw_v 或 v 中的数据放到参数矩阵 matrix_a/matrix_b/
+      //matrix_c参数矩阵中。
       switch (operand_num) {
         case 1:  // operand 1
           for (k = 0; k < 8; k++) {
@@ -2033,6 +2050,7 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
     }
     if (core->get_gpu()->gpgpu_ctx->debug_tensorcore) printf("\n");
   }
+  //DEBUG用。
   if (core->get_gpu()->gpgpu_ctx->debug_tensorcore) {
     printf("MATRIX_A\n");
     for (i = 0; i < 16; i++) {
@@ -2062,6 +2080,7 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
       printf("\n");
     }
   }
+  //设置 D 矩阵初值为0.0。
   for (i = 0; i < 16; i++) {
     for (j = 0; j < 16; j++) {
       matrix_d[i][j].f16 = 0;
@@ -2091,6 +2110,7 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
       }
     }
   }
+  //DEBUG用。
   if (core->get_gpu()->gpgpu_ctx->debug_tensorcore) {
     printf("MATRIX_D\n");
     for (i = 0; i < 16; i++) {
@@ -2104,6 +2124,7 @@ void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
       printf("\n");
     }
   }
+  //Store D 矩阵的结果到目的地址。
   for (thrd = 0; thrd < core->get_warp_size(); thrd++) {
     int row_t[8];
     int col_t[8];
