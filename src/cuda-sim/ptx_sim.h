@@ -59,7 +59,11 @@ struct param_t {
 
 using half_float::half;
 
+/*
+PTX指令中的寄存器类。
+*/
 union ptx_reg_t {
+  //构造函数。
   ptx_reg_t() {
     bits.ms = 0;
     bits.ls = 0;
