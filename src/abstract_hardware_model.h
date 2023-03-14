@@ -1337,6 +1337,7 @@ class warp_inst_t : public inst_t {
     assert(!m_empty);
     return m_warp_id;
   }
+  //仅被用于功能模拟。
   unsigned warp_id_func() const  // to be used in functional simulations only
   {
     return m_warp_id;
