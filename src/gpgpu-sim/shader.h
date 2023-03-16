@@ -85,39 +85,67 @@ enum exec_unit_type_t {
   SPECIALIZED = 7
 };
 
+/*
+线程的状态上下文。
+*/
 class thread_ctx_t {
  public:
+  //该线程所属的CTA的ID。
   unsigned m_cta_id;  // hardware CTA this thread belongs
 
   // per thread stats (ac stands for accumulative).
+  //该线程内处理的指令总条数。
   unsigned n_insn;
   unsigned n_insn_ac;
   unsigned n_l1_mis_ac;
   unsigned n_l1_mrghit_ac;
   unsigned n_l1_access_ac;
-
+  //标识线程是否处于活跃状态。
   bool m_active;
 };
 
+/*
+模拟了内核中warp的模拟状态，是一个性能模拟过程中的warp的对象。SIMT Core就是一个shd_warp_t对象的集合，
+它模拟了内核中每个warp的模拟状态。手册中<<#Simt-core图>>所示的I-Buffer被实现在shader_core_ctx内部的
+shd_warp_t对象中。每个shd_warp_t都有一组m_ibuffer的I-Buffer条目(ibuffer_entry)，持有可配置的指令数
+量（一个周期内允许获取的最大指令）。另外，shd_warp_t有一些标志，这些标志被调度器用来确定warp的发射资格。
+存储在ibuffer_entry中的解码指令是一个指向warp_inst_t对象的指针。warp_inst_t持有关于这条指令的操作类
+型和所用操作数的信息。
+*/
 class shd_warp_t {
  public:
+  //构造函数。参数分别为：
+  //    shader_core_ctx *shader：SIMT Core的对象；
+  //    unsigned warp_size：单个warp内的线程数量，warp的大小。
   shd_warp_t(class shader_core_ctx *shader, unsigned warp_size)
       : m_shader(shader), m_warp_size(warp_size) {
+    //初始化已发送但尚未确认的存储请求数为零。
     m_stores_outstanding = 0;
+    //初始化在流水线中执行的指令数为零。
     m_inst_in_pipeline = 0;
     reset();
   }
+  //初始化。
   void reset() {
     assert(m_stores_outstanding == 0);
     assert(m_inst_in_pipeline == 0);
+    //初始化设置warp因指令缓冲未命中而挂起的状态为false。
     m_imiss_pending = false;
+    //warp ID初始化为-1。
     m_warp_id = (unsigned)-1;
+    //动态warp ID初始化为-1。
     m_dynamic_warp_id = (unsigned)-1;
+    //设置已经完成的线程的数量为warp大小。后面还需要将活跃的线程数减掉。
     n_completed = m_warp_size;
+    //设置未完成的原子操作数为零。名字里的n代表not。
     m_n_atomic = 0;
+    //设置warp处于memory barrier状态的标识为false。
     m_membar = false;
+    //设置线程退出的标识为true。
     m_done_exit = true;
+    //设置上次取指的时钟周期，时刻值为零时刻。
     m_last_fetch = 0;
+    //设置指令缓冲中下一条待取的指令的编号为零。
     m_next = 0;
 
     // Jin: cdp support
@@ -133,65 +161,88 @@ class shd_warp_t {
     m_next_pc = start_pc;
     assert(n_completed >= active.count());
     assert(n_completed <= m_warp_size);
+    //将已经完成的线程的数量初始值，减去活跃线程的数量，因为活跃线程代表它们尚未完成执行。
     n_completed -= active.count();  // active threads are not yet completed
+    //设置活跃线程的位图，为参数active。
     m_active_threads = active;
+    //设置线程退出的标识为false。
     m_done_exit = false;
 
     // Jin: cdp support
     m_cdp_latency = 0;
     m_cdp_dummy = false;
   }
-
+  //返回warp已经执行完毕的标志，已经完成的线程数量=warp的大小时，就代表该warp已经完成。
   bool functional_done() const;
+  //返回warp是否由于（warp已经执行完毕且在等待新内核初始化、CTA处于barrier、memory barrier、还有未
+  //完成的原子操作）四个条件处于等待状态。
   bool waiting();  // not const due to membar
+  //hardware_done()检查这个warp是否已经完成执行并且可以回收。
   bool hardware_done() const;
-
+  //返回线程退出的标识。
   bool done_exit() const { return m_done_exit; }
+  //设置线程退出的标识。
   void set_done_exit() { m_done_exit = true; }
 
   void print(FILE *fout) const;
   void print_ibuffer(FILE *fout) const;
-
+  //返回单个warp中已经执行完毕的线程数量。
   unsigned get_n_completed() const { return n_completed; }
+  //增加单个warp中已经执行完毕的线程数量，m_active_threads是活跃线程的位图，为1代表一个线程处于活跃
+  //状态，这里将其reset为零，并增加n_completed。
   void set_completed(unsigned lane) {
     assert(m_active_threads.test(lane));
     m_active_threads.reset(lane);
     n_completed++;
   }
-
+  //设置上次取指的时钟周期，时刻值为 sim_cycle。
   void set_last_fetch(unsigned long long sim_cycle) {
     m_last_fetch = sim_cycle;
   }
-
+  //返回未完成的原子操作数。
   unsigned get_n_atomic() const { return m_n_atomic; }
+  //增加未完成的原子操作数。
   void inc_n_atomic() { m_n_atomic++; }
+  //减掉未完成的原子操作数。
   void dec_n_atomic(unsigned n) { m_n_atomic -= n; }
-
+  //设置内存屏障状态的标识为true，warp正在memory barrier处等待。
   void set_membar() { m_membar = true; }
+  //清除内存屏障状态的标识，重置为false，即此刻warp没有在memory barrier处等待。
   void clear_membar() { m_membar = false; }
+  //返回内存屏障状态的标识。
   bool get_membar() const { return m_membar; }
+  //返回warp内下一个要执行的指令的PC值。
   virtual address_type get_pc() const { return m_next_pc; }
+  //返回绑定在当前Shader Core的kernel的内核函数信息，kernel_info_t对象。
   virtual kernel_info_t* get_kernel_info() const;
+  //设置warp内下一个要执行的指令的PC值。
   void set_next_pc(address_type pc) { m_next_pc = pc; }
-
+  //保存上一条处于屏障指令处的指令。
   void store_info_of_last_inst_at_barrier(const warp_inst_t *pI) {
     m_inst_at_barrier = *pI;
   }
+  //返回上一条处于屏障指令处的指令。
   warp_inst_t *restore_info_of_last_inst_at_barrier() {
     return &m_inst_at_barrier;
   }
-
+  //将一条新指令存入I-Bufer。传入的参数：
+  //    unsigned slot：存入I-Bufer的槽编号；
+  //    warp_inst_t *pI：存入的指令。
   void ibuffer_fill(unsigned slot, const warp_inst_t *pI) {
     assert(slot < IBUFFER_SIZE);
     m_ibuffer[slot].m_inst = pI;
     m_ibuffer[slot].m_valid = true;
+    //指令缓冲中下一条待取的指令的编号。
     m_next = 0;
   }
+  //返回I-Bufer是否为空。
   bool ibuffer_empty() const {
+    //遍历I-Bufer所有槽，有一个有效的话就返回false。
     for (unsigned i = 0; i < IBUFFER_SIZE; i++)
       if (m_ibuffer[i].m_valid) return false;
     return true;
   }
+  //清除I-Buffer中的所有槽。
   void ibuffer_flush() {
     for (unsigned i = 0; i < IBUFFER_SIZE; i++) {
       if (m_ibuffer[i].m_valid) dec_inst_in_pipeline();
@@ -199,25 +250,34 @@ class shd_warp_t {
       m_ibuffer[i].m_valid = false;
     }
   }
+  //返回I-Buffer中的下一条待取的指令。
   const warp_inst_t *ibuffer_next_inst() { return m_ibuffer[m_next].m_inst; }
+  //返回I-Buffer中的下一条待取的指令是否有效。
   bool ibuffer_next_valid() { return m_ibuffer[m_next].m_valid; }
+  //释放I-Buffer中的下一条待取的指令槽。
   void ibuffer_free() {
     m_ibuffer[m_next].m_inst = NULL;
     m_ibuffer[m_next].m_valid = false;
   }
+  //刷新m_next的值，I-Buffer中下一条待取的指令槽。
   void ibuffer_step() { m_next = (m_next + 1) % IBUFFER_SIZE; }
-
+  //返回warp是否因指令缓冲未命中而挂起的状态标识。
   bool imiss_pending() const { return m_imiss_pending; }
+  //设置warp因指令缓冲未命中而挂起的状态。
   void set_imiss_pending() { m_imiss_pending = true; }
+  //清除warp因指令缓冲未命中而挂起的状态。
   void clear_imiss_pending() { m_imiss_pending = false; }
-
+  //返回所有store访存请求是否已经全部执行完，已发送但尚未确认的存储请求数m_stores_outstanding=0时，
+  //代表所有store访存请求已经全部执行完。
   bool stores_done() const { return m_stores_outstanding == 0; }
+  //增加已发送但尚未确认的存储请求数。
   void inc_store_req() { m_stores_outstanding++; }
+  //减少已发送但尚未确认的存储请求数。
   void dec_store_req() {
     assert(m_stores_outstanding > 0);
     m_stores_outstanding--;
   }
-
+  //返回I-Buffer中的有效指令的总数。
   unsigned num_inst_in_buffer() const {
     unsigned count = 0;
     for (unsigned i = 0; i < IBUFFER_SIZE; i++) {
@@ -225,60 +285,85 @@ class shd_warp_t {
     }
     return count;
   }
+  //返回在流水线中执行的指令数。
   unsigned num_inst_in_pipeline() const { return m_inst_in_pipeline; }
+  //返回已经发射到流水线中的指令数，但这个函数貌似计算不对，也没有被用到，暂时先不管。
   unsigned num_issued_inst_in_pipeline() const {
     return (num_inst_in_pipeline() - num_inst_in_buffer());
   }
+  //返回是否在流水线中有正在执行的指令。
   bool inst_in_pipeline() const { return m_inst_in_pipeline > 0; }
+  //增加在流水线中执行的指令数。
   void inc_inst_in_pipeline() { m_inst_in_pipeline++; }
+  //减少在流水线中执行的指令数。
   void dec_inst_in_pipeline() {
     assert(m_inst_in_pipeline > 0);
     m_inst_in_pipeline--;
   }
-
+  //返回warp所在的CTA的ID。
   unsigned get_cta_id() const { return m_cta_id; }
-
+  //返回动态warp的ID。
   unsigned get_dynamic_warp_id() const { return m_dynamic_warp_id; }
+  //返回warp的ID。
   unsigned get_warp_id() const { return m_warp_id; }
-
+  //返回warp所在的SIMT Core对象。
   class shader_core_ctx * get_shader() { return m_shader; }
  private:
+  //设置指令缓冲的大小为2。
   static const unsigned IBUFFER_SIZE = 2;
+  //SIMT Core的对象。
   class shader_core_ctx *m_shader;
+  //warp所在的CTA的ID。
   unsigned m_cta_id;
+  //warp的ID。
   unsigned m_warp_id;
+  //单个warp内的线程数量，warp的大小。
   unsigned m_warp_size;
+  //动态warp的ID。
   unsigned m_dynamic_warp_id;
-
+  //warp内下一个要执行的指令的PC值，在shd_warp_t对象初建时，被设置为start_pc。
   address_type m_next_pc;
+  //单个warp中已经执行完毕的线程数量，当此线程数量达到32时，代表一个warp执行完毕。
   unsigned n_completed;  // number of threads in warp completed
+  //活跃线程的位图，为1代表一个线程处于活跃状态。
   std::bitset<MAX_WARP_SIZE> m_active_threads;
-
+  //标识是否因指令缓冲未命中而挂起的状态。
   bool m_imiss_pending;
 
+  //指令缓冲的条目结构。
   struct ibuffer_entry {
     ibuffer_entry() {
+      //初始化条目的有效位。
       m_valid = false;
+      //初始化条目内储存的指令。
       m_inst = NULL;
     }
+    //条目内储存的指令。
     const warp_inst_t *m_inst;
+    //条目的有效位。
     bool m_valid;
   };
 
   warp_inst_t m_inst_at_barrier;
+  //IBUFFER_SIZE大小的指令缓冲。
   ibuffer_entry m_ibuffer[IBUFFER_SIZE];
+  //I-Buffer中下一条待取的指令槽。
   unsigned m_next;
-
+  //未完成的原子操作数。
   unsigned m_n_atomic;  // number of outstanding atomic operations
+  //内存屏障状态的标识，如果为true，则warp正在memory barrier处等待。
   bool m_membar;        // if true, warp is waiting at memory barrier
 
+  //线程退出的标识，一旦为该warp中的线程注册了线程退出，则为true。
   bool m_done_exit;  // true once thread exit has been registered for threads in
                      // this warp
 
+  //上次取指的时钟周期，时刻值.
   unsigned long long m_last_fetch;
-
+  //已发送但尚未确认的存储请求数。
   unsigned m_stores_outstanding;  // number of store requests sent but not yet
                                   // acknowledged
+  //在流水线中执行的指令数。
   unsigned m_inst_in_pipeline;
 
   // Jin: cdp support
@@ -1014,6 +1099,9 @@ class opndcoll_rfu_t {  // operand collector based register file unit
   shader_core_ctx *m_shader;
 };
 
+/*
+
+*/
 class barrier_set_t {
  public:
   barrier_set_t(shader_core_ctx *shader, unsigned max_warps_per_core,
@@ -1060,6 +1148,10 @@ struct insn_latency_info {
   unsigned long latency;
 };
 
+/*
+指令获取缓冲区。指令获取缓冲区（ifetch_Buffer_t）对指令缓存（I-cache）和SM Core之间的接口进行建模。
+它有一个成员m_valid，用于指示缓冲区是否有有效的指令。它还将指令的warp id记录在m_warp_id中。
+*/
 struct ifetch_buffer_t {
   ifetch_buffer_t() { m_valid = false; }
 
@@ -1756,7 +1848,7 @@ struct shader_core_stats_pod {
   unsigned gpgpu_n_stall_shd_mem;
   unsigned *single_issue_nums;
   unsigned *dual_issue_nums;
-
+  //已经完成的CTA数量。
   unsigned ctas_completed;
   // memory access classification
   int gpgpu_n_mem_read_local;
@@ -2031,6 +2123,9 @@ class shader_core_mem_fetch_allocator : public mem_fetch_allocator {
   const memory_config *m_memory_config;
 };
 
+/*
+Shader Core。
+*/
 class shader_core_ctx : public core_t {
  public:
   // creator:
@@ -2443,12 +2538,16 @@ class shader_core_ctx : public core_t {
   // CTA scheduling / hardware thread allocation
   unsigned m_n_active_cta;  // number of Cooperative Thread Arrays (blocks)
                             // currently running on this shader.
+  //m_cta_status是Shader Core内的CTA的状态，MAX_CTA_PER_SHADER是每个Shader Core内的最大可并发
+  //CTA个数。m_cta_status[i]里保存了第i个CTA中包含的活跃线程总数量，该数量 <= CTA的总线程数量。
   unsigned m_cta_status[MAX_CTA_PER_SHADER];  // CTAs status
+  //未完成的线程数（当此核心上的所有线程都完成时，==0）。
   unsigned m_not_completed;  // number of threads to be completed (==0 when all
                              // thread on this core completed)
   std::bitset<MAX_THREAD_PER_SM> m_active_threads;
 
   // thread contexts
+  //
   thread_ctx_t *m_threadState;
 
   // interconnect interface
@@ -2461,7 +2560,10 @@ class shader_core_ctx : public core_t {
 
   // decode/dispatch
   std::vector<shd_warp_t *> m_warp;  // per warp information array
+  //
   barrier_set_t m_barriers;
+  //指令获取缓冲区。指令获取缓冲区（ifetch_Buffer_t）对指令缓存（I-cache）和SIMT Core之间的接口进行
+  //建模。它有一个成员m_valid，用于指示缓冲区是否有有效的指令。它还将指令的warp id记录在m_warp_id中。
   ifetch_buffer_t m_inst_fetch_buffer;
   std::vector<register_set> m_pipeline_reg;
   Scoreboard *m_scoreboard;
