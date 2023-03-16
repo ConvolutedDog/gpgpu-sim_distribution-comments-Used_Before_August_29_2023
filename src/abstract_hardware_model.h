@@ -1509,6 +1509,7 @@ class core_t {
 
  protected:
   class gpgpu_sim *m_gpu;
+  //运行在当前SIMT Core上的内核函数。
   kernel_info_t *m_kernel;
   simt_stack **m_simt_stack;  // pdom based reconvergence context for each warp
   class ptx_thread_info **m_thread;
