@@ -149,6 +149,10 @@ bool Scoreboard::checkCollision(unsigned wid, const class inst_t* inst) const {
   return false;
 }
 
+/*
+返回记分牌的reg_table中是否有挂起的写入。warp id指向的reg_table为空的话，代表没有挂起的写入，返回
+false。
+*/
 bool Scoreboard::pendingWrites(unsigned wid) const {
   return !reg_table[wid].empty();
 }
