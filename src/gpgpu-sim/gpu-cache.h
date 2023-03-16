@@ -1019,8 +1019,19 @@ class tag_array {
   line_table pending_lines;
 };
 
+/*
+未命中状态保持寄存器，the miss status holding register，MSHR。MSHR的模型是用mshr_table类来模拟
+一个具有有限数量的合并请求的完全关联表。请求通过next_access()函数从MSHR中释放。MSHR表具有固定数量
+的MSHR条目。每个MSHR条目可以为单个缓存行（Cache Line）提供固定数量的未命中请求。MSHR条目的数量和每
+个条目的最大请求数是可配置的。
+*/
 class mshr_table {
  public:
+  //构造函数。参数为：
+  //    num_entries：MSHR中的条目的个数。
+  //    max_merged：MSHR中的单个条目的最大请求数，当一个请求正在运行时，对内存系统的冗余访问被合
+  //                并到MSHR中。
+  //    m_data：std::unordered_map，是<new_addr_type, mshr_entry>的无序map。
   mshr_table(unsigned num_entries, unsigned max_merged)
       : m_num_entries(num_entries),
         m_max_merged(max_merged)
@@ -1031,22 +1042,30 @@ class mshr_table {
   {
   }
 
-  /// Checks if there is a pending request to the lower memory level already
+  // Checks if there is a pending request to the lower memory level already
+  //检查是否已存在对较低内存级别的挂起请求。
   bool probe(new_addr_type block_addr) const;
-  /// Checks if there is space for tracking a new memory access
+  // Checks if there is space for tracking a new memory access
+  //检查是否有空间处理新的内存访问。
   bool full(new_addr_type block_addr) const;
-  /// Add or merge this access
+  // Add or merge this access
+  //添加或合并此访问。
   void add(new_addr_type block_addr, mem_fetch *mf);
-  /// Returns true if cannot accept new fill responses
+  // Returns true if cannot accept new fill responses
+  //如果无法接受新的填充响应，则返回true。
   bool busy() const { return false; }
-  /// Accept a new cache fill response: mark entry ready for processing
+  // Accept a new cache fill response: mark entry ready for processing
+  //接受新的缓存填充响应：标记条目以备处理。
   void mark_ready(new_addr_type block_addr, bool &has_atomic);
-  /// Returns true if ready accesses exist
+  // Returns true if ready accesses exist
+  //如果存在就绪访问，则返回true。
   bool access_ready() const { return !m_current_response.empty(); }
-  /// Returns next ready access
+  // Returns next ready access
+  //返回下一个就绪访问。
   mem_fetch *next_access();
   void display(FILE *fp) const;
   // Returns true if there is a pending read after write
+  //如果存在挂起的写后读请求，返回true。
   bool is_read_after_write_pending(new_addr_type block_addr);
 
   void check_mshr_parameters(unsigned num_entries, unsigned max_merged) {
@@ -1059,11 +1078,14 @@ class mshr_table {
  private:
   // finite sized, fully associative table, with a finite maximum number of
   // merged requests
+  //大小有限、完全关联的表，合并请求的最大数量有限。
   const unsigned m_num_entries;
   const unsigned m_max_merged;
-
+  //MSHR表中的条目对象。
   struct mshr_entry {
+    //单个条目中可以合并的内存访问请求。
     std::list<mem_fetch *> m_list;
+    //单个条目是否是原子操作。
     bool m_has_atomic;
     mshr_entry() : m_has_atomic(false) {}
   };
@@ -1073,16 +1095,18 @@ class mshr_table {
   line_table pending_lines;
 
   // it may take several cycles to process the merged requests
+  //处理合并的请求可能需要几个周期。这个变量貌似没有用到。
   bool m_current_response_ready;
+  //就绪内存访问的列表。
   std::list<new_addr_type> m_current_response;
 };
 
 /***************************************************************** Caches
  * *****************************************************************/
-///
-/// Simple struct to maintain cache accesses, misses, pending hits, and
-/// reservation fails.
-///
+//
+// Simple struct to maintain cache accesses, misses, pending hits, and
+// reservation fails.
+//
 struct cache_sub_stats {
   unsigned long long accesses;
   unsigned long long misses;
@@ -1104,9 +1128,9 @@ struct cache_sub_stats {
     fill_port_busy_cycles = 0;
   }
   cache_sub_stats &operator+=(const cache_sub_stats &css) {
-    ///
-    /// Overloading += operator to easily accumulate stats
-    ///
+    //
+    // Overloading += operator to easily accumulate stats
+    //
     accesses += css.accesses;
     misses += css.misses;
     pending_hits += css.pending_hits;
@@ -1118,9 +1142,9 @@ struct cache_sub_stats {
   }
 
   cache_sub_stats operator+(const cache_sub_stats &cs) {
-    ///
-    /// Overloading + operator to easily accumulate stats
-    ///
+    //
+    // Overloading + operator to easily accumulate stats
+    //
     cache_sub_stats ret;
     ret.accesses = accesses + cs.accesses;
     ret.misses = misses + cs.misses;
@@ -1164,9 +1188,9 @@ struct cache_sub_stats_pw {
     read_res_fails = 0;
   }
   cache_sub_stats_pw &operator+=(const cache_sub_stats_pw &css) {
-    ///
-    /// Overloading += operator to easily accumulate stats
-    ///
+    //
+    // Overloading += operator to easily accumulate stats
+    //
     accesses += css.accesses;
     write_misses += css.write_misses;
     read_misses += css.read_misses;
@@ -1178,9 +1202,9 @@ struct cache_sub_stats_pw {
   }
 
   cache_sub_stats_pw operator+(const cache_sub_stats_pw &cs) {
-    ///
-    /// Overloading + operator to easily accumulate stats
-    ///
+    //
+    // Overloading + operator to easily accumulate stats
+    //
     cache_sub_stats_pw ret;
     ret.accesses = accesses + cs.accesses;
     ret.write_misses = write_misses + cs.write_misses;
@@ -1193,12 +1217,12 @@ struct cache_sub_stats_pw {
   }
 };
 
-///
-/// Cache_stats
-/// Used to record statistics for each cache.
-/// Maintains a record of every 'mem_access_type' and its resulting
-/// 'cache_request_status' : [mem_access_type][cache_request_status]
-///
+//
+// Cache_stats
+// Used to record statistics for each cache.
+// Maintains a record of every 'mem_access_type' and its resulting
+// 'cache_request_status' : [mem_access_type][cache_request_status]
+//
 class cache_stats {
  public:
   cache_stats();
@@ -1262,9 +1286,9 @@ bool was_write_sent(const std::list<cache_event> &events);
 bool was_read_sent(const std::list<cache_event> &events);
 bool was_writeallocate_sent(const std::list<cache_event> &events);
 
-/// Baseline cache
-/// Implements common functions for read_only_cache and data_cache
-/// Each subclass implements its own 'access' function
+// Baseline cache
+// Implements common functions for read_only_cache and data_cache
+// Each subclass implements its own 'access' function
 class baseline_cache : public cache_t {
  public:
   baseline_cache(const char *name, cache_config &config, int core_id,
@@ -1297,17 +1321,17 @@ class baseline_cache : public cache_t {
   virtual enum cache_request_status access(new_addr_type addr, mem_fetch *mf,
                                            unsigned time,
                                            std::list<cache_event> &events) = 0;
-  /// Sends next request to lower level of memory
+  // Sends next request to lower level of memory
   void cycle();
-  /// Interface for response from lower memory level (model bandwidth
-  /// restictions in caller)
+  // Interface for response from lower memory level (model bandwidth
+  // restictions in caller)
   void fill(mem_fetch *mf, unsigned time);
-  /// Checks if mf is waiting to be filled by lower memory level
+  // Checks if mf is waiting to be filled by lower memory level
   bool waiting_for_fill(mem_fetch *mf);
-  /// Are any (accepted) accesses that had to wait for memory now ready? (does
-  /// not include accesses that "HIT")
+  // Are any (accepted) accesses that had to wait for memory now ready? (does
+  // not include accesses that "HIT")
   bool access_ready() const { return m_mshrs.access_ready(); }
-  /// Pop next ready access (does not include accesses that "HIT")
+  // Pop next ready access (does not include accesses that "HIT")
   mem_fetch *next_access() { return m_mshrs.next_access(); }
   // flash invalidate all entries in cache
   void flush() { m_tag_array->flush(); }
@@ -1403,42 +1427,42 @@ class baseline_cache : public cache_t {
 
   cache_stats m_stats;
 
-  /// Checks whether this request can be handled on this cycle. num_miss equals
-  /// max # of misses to be handled on this cycle
+  // Checks whether this request can be handled on this cycle. num_miss equals
+  // max # of misses to be handled on this cycle
   bool miss_queue_full(unsigned num_miss) {
     return ((m_miss_queue.size() + num_miss) >= m_config.m_miss_queue_size);
   }
-  /// Read miss handler without writeback
+  // Read miss handler without writeback
   void send_read_request(new_addr_type addr, new_addr_type block_addr,
                          unsigned cache_index, mem_fetch *mf, unsigned time,
                          bool &do_miss, std::list<cache_event> &events,
                          bool read_only, bool wa);
-  /// Read miss handler. Check MSHR hit or MSHR available
+  // Read miss handler. Check MSHR hit or MSHR available
   void send_read_request(new_addr_type addr, new_addr_type block_addr,
                          unsigned cache_index, mem_fetch *mf, unsigned time,
                          bool &do_miss, bool &wb, evicted_block_info &evicted,
                          std::list<cache_event> &events, bool read_only,
                          bool wa);
 
-  /// Sub-class containing all metadata for port bandwidth management
+  // Sub-class containing all metadata for port bandwidth management
   class bandwidth_management {
    public:
     bandwidth_management(cache_config &config);
 
-    /// use the data port based on the outcome and events generated by the
-    /// mem_fetch request
+    // use the data port based on the outcome and events generated by the
+    // mem_fetch request
     void use_data_port(mem_fetch *mf, enum cache_request_status outcome,
                        const std::list<cache_event> &events);
 
-    /// use the fill port
+    // use the fill port
     void use_fill_port(mem_fetch *mf);
 
-    /// called every cache cycle to free up the ports
+    // called every cache cycle to free up the ports
     void replenish_port_bandwidth();
 
-    /// query for data port availability
+    // query for data port availability
     bool data_port_free() const;
-    /// query for fill port availability
+    // query for fill port availability
     bool fill_port_free() const;
 
    protected:
@@ -1453,7 +1477,7 @@ class baseline_cache : public cache_t {
   bandwidth_management m_bandwidth_management;
 };
 
-/// Read only cache
+// Read only cache
 class read_only_cache : public baseline_cache {
  public:
   read_only_cache(const char *name, cache_config &config, int core_id,
@@ -1461,8 +1485,8 @@ class read_only_cache : public baseline_cache {
                   enum mem_fetch_status status)
       : baseline_cache(name, config, core_id, type_id, memport, status) {}
 
-  /// Access cache for read_only_cache: returns RESERVATION_FAIL if request
-  /// could not be accepted (for any reason)
+  // Access cache for read_only_cache: returns RESERVATION_FAIL if request
+  // could not be accepted (for any reason)
   virtual enum cache_request_status access(new_addr_type addr, mem_fetch *mf,
                                            unsigned time,
                                            std::list<cache_event> &events);
@@ -1477,7 +1501,7 @@ class read_only_cache : public baseline_cache {
                        new_tag_array) {}
 };
 
-/// Data cache - Implements common functions for L1 and L2 data cache
+// Data cache - Implements common functions for L1 and L2 data cache
 class data_cache : public baseline_cache {
  public:
   data_cache(const char *name, cache_config &config, int core_id, int type_id,
@@ -1583,7 +1607,7 @@ class data_cache : public baseline_cache {
   mem_fetch_allocator *m_memfetch_creator;
 
   // Functions for data cache access
-  /// Sends write request to lower level memory (write or writeback)
+  // Sends write request to lower level memory (write or writeback)
   void send_write_request(mem_fetch *mf, cache_event request, unsigned time,
                           std::list<cache_event> &events);
   void update_m_readable(mem_fetch *mf, unsigned cache_index);
@@ -1593,7 +1617,7 @@ class data_cache : public baseline_cache {
   enum cache_request_status (data_cache::*m_wr_hit)(
       new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
       std::list<cache_event> &events, enum cache_request_status status);
-  /// Marks block as MODIFIED and updates block LRU
+  // Marks block as MODIFIED and updates block LRU
   enum cache_request_status wr_hit_wb(
       new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
       std::list<cache_event> &events,
@@ -1603,7 +1627,7 @@ class data_cache : public baseline_cache {
       std::list<cache_event> &events,
       enum cache_request_status status);  // write-through
 
-  /// Marks block as INVALID and sends write request to lower level memory
+  // Marks block as INVALID and sends write request to lower level memory
   enum cache_request_status wr_hit_we(
       new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
       std::list<cache_event> &events,
@@ -1617,7 +1641,7 @@ class data_cache : public baseline_cache {
   enum cache_request_status (data_cache::*m_wr_miss)(
       new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
       std::list<cache_event> &events, enum cache_request_status status);
-  /// Sends read request, and possible write-back request,
+  // Sends read request, and possible write-back request,
   //  to lower level memory for a write miss with write-allocate
   enum cache_request_status wr_miss_wa_naive(
       new_addr_type addr, unsigned cache_index, mem_fetch *mf, unsigned time,
@@ -1665,10 +1689,10 @@ class data_cache : public baseline_cache {
                                          enum cache_request_status status);
 };
 
-/// This is meant to model the first level data cache in Fermi.
-/// It is write-evict (global) or write-back (local) at
-/// the granularity of individual blocks
-/// (the policy used in fermi according to the CUDA manual)
+// This is meant to model the first level data cache in Fermi.
+// It is write-evict (global) or write-back (local) at
+// the granularity of individual blocks
+// (the policy used in fermi according to the CUDA manual)
 class l1_cache : public data_cache {
  public:
   l1_cache(const char *name, cache_config &config, int core_id, int type_id,
@@ -1692,8 +1716,8 @@ class l1_cache : public data_cache {
                    new_tag_array, L1_WR_ALLOC_R, L1_WRBK_ACC, gpu) {}
 };
 
-/// Models second level shared cache with global write-back
-/// and write-allocate policies
+// Models second level shared cache with global write-back
+// and write-allocate policies
 class l2_cache : public data_cache {
  public:
   l2_cache(const char *name, cache_config &config, int core_id, int type_id,
@@ -1738,22 +1762,22 @@ class tex_cache : public cache_t {
     m_rob_status = rob_status;
   }
 
-  /// Access function for tex_cache
-  /// return values: RESERVATION_FAIL if request could not be accepted
-  /// otherwise returns HIT_RESERVED or MISS; NOTE: *never* returns HIT
-  /// since unlike a normal CPU cache, a "HIT" in texture cache does not
-  /// mean the data is ready (still need to get through fragment fifo)
+  // Access function for tex_cache
+  // return values: RESERVATION_FAIL if request could not be accepted
+  // otherwise returns HIT_RESERVED or MISS; NOTE: *never* returns HIT
+  // since unlike a normal CPU cache, a "HIT" in texture cache does not
+  // mean the data is ready (still need to get through fragment fifo)
   enum cache_request_status access(new_addr_type addr, mem_fetch *mf,
                                    unsigned time,
                                    std::list<cache_event> &events);
   void cycle();
-  /// Place returning cache block into reorder buffer
+  // Place returning cache block into reorder buffer
   void fill(mem_fetch *mf, unsigned time);
-  /// Are any (accepted) accesses that had to wait for memory now ready? (does
-  /// not include accesses that "HIT")
+  // Are any (accepted) accesses that had to wait for memory now ready? (does
+  // not include accesses that "HIT")
   bool access_ready() const { return !m_result_fifo.empty(); }
-  /// Pop next ready access (includes both accesses that "HIT" and those that
-  /// "MISS")
+  // Pop next ready access (includes both accesses that "HIT" and those that
+  // "MISS")
   mem_fetch *next_access() { return m_result_fifo.pop(); }
   void display_state(FILE *fp) const;
 
