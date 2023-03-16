@@ -380,6 +380,7 @@ inline unsigned wid_from_hw_tid(unsigned tid, unsigned warp_size) {
 };
 
 const unsigned WARP_PER_CTA_MAX = 64;
+//单个CTA内的所有warp数量大小的位图，后面可用于多种功能。
 typedef std::bitset<WARP_PER_CTA_MAX> warp_set_t;
 
 int register_bank(int regnum, int wid, unsigned num_banks,
@@ -1100,7 +1101,7 @@ class opndcoll_rfu_t {  // operand collector based register file unit
 };
 
 /*
-
+barrier的集合。
 */
 class barrier_set_t {
  public:
@@ -1108,21 +1109,24 @@ class barrier_set_t {
                 unsigned max_cta_per_core, unsigned max_barriers_per_cta,
                 unsigned warp_size);
 
-  // during cta allocation
+  // during cta allocation.
   void allocate_barrier(unsigned cta_id, warp_set_t warps);
 
-  // during cta deallocation
+  // during cta deallocation.
   void deallocate_barrier(unsigned cta_id);
-
+  //Map<CTA ID，单个CTA内的所有warp数量大小的位图>。
   typedef std::map<unsigned, warp_set_t> cta_to_warp_t;
+  //Map<barrier ID，单个CTA内的所有warp数量大小的位图>。
   typedef std::map<unsigned, warp_set_t>
       bar_id_to_warp_t; /*set of warps reached a specific barrier id*/
 
-  // individual warp hits barrier
+  // individual warp hits barrier.
+  //单个warp到达barrier。
   void warp_reaches_barrier(unsigned cta_id, unsigned warp_id,
                             warp_inst_t *inst);
 
-  // warp reaches exit
+  // warp reaches exit.
+  //
   void warp_exit(unsigned warp_id);
 
   // assertions
@@ -1136,6 +1140,7 @@ class barrier_set_t {
   unsigned m_max_warps_per_core;
   unsigned m_max_barriers_per_cta;
   unsigned m_warp_size;
+  //Map<CTA ID，单个CTA内的所有warp数量大小的位图>。
   cta_to_warp_t m_cta_to_warps;
   bar_id_to_warp_t m_bar_id_to_warps;
   warp_set_t m_warp_active;
@@ -2160,6 +2165,9 @@ class shader_core_ctx : public core_t {
   bool ldst_unit_response_buffer_full() const;
   unsigned get_not_completed() const { return m_not_completed; }
   unsigned get_n_active_cta() const { return m_n_active_cta; }
+
+  //m_n_active_cta指当前在此Shader Core上运行的CTA的数量。如果该数量大于0，则代表当前Core是活跃的；反之，
+  //则代表当前Core是非活跃的。
   unsigned isactive() const {
     if (m_n_active_cta > 0)
       return 1;
@@ -2536,6 +2544,7 @@ class shader_core_ctx : public core_t {
   shader_core_stats *m_stats;
 
   // CTA scheduling / hardware thread allocation
+  //当前在此Shader Core上运行的CTA的数量。
   unsigned m_n_active_cta;  // number of Cooperative Thread Arrays (blocks)
                             // currently running on this shader.
   //m_cta_status是Shader Core内的CTA的状态，MAX_CTA_PER_SHADER是每个Shader Core内的最大可并发
@@ -2676,6 +2685,7 @@ class simt_core_cluster {
   unsigned get_not_completed() const;
   void print_not_completed(FILE *fp) const;
   unsigned get_n_active_cta() const;
+  //返回SIMT Core集群中的活跃SM的数量。
   unsigned get_n_active_sms() const;
   gpgpu_sim *get_gpu() { return m_gpu; }
 
