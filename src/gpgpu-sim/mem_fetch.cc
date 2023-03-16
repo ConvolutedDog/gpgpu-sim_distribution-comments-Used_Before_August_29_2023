@@ -101,6 +101,9 @@ void mem_fetch::print(FILE *fp, bool print_inst) const {
     fprintf(fp, "\n");
 }
 
+/*
+设置内存请求的状态，和状态变化所处的时钟周期。
+*/
 void mem_fetch::set_status(enum mem_fetch_status status,
                            unsigned long long cycle) {
   m_status = status;
@@ -112,6 +115,9 @@ bool mem_fetch::isatomic() const {
   return m_inst.isatomic();
 }
 
+/*
+执行原子操作。
+*/
 void mem_fetch::do_atomic() { m_inst.do_atomic(m_access.get_warp_mask()); }
 
 bool mem_fetch::istexture() const {
