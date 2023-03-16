@@ -29,6 +29,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+/*
+shader.cc是SIMT Core的时序模型。它调用cudu-sim对一个特定的线程进行功能模拟，cuda-sim将返回该线程
+的性能敏感的信息。
+*/
+
 #include "shader.h"
 #include <float.h>
 #include <limits.h>
@@ -916,11 +921,29 @@ void shader_core_ctx::decode() {
   }
 }
 
+/*
+SIMT Core的取指令时钟周期。
+*/
 void shader_core_ctx::fetch() {
+  //m_inst_fetch_buffer的定义为：
+  //    ifetch_buffer_t m_inst_fetch_buffer;
+  //指令获取缓冲区。指令获取缓冲区（ifetch_Buffer_t）对指令缓存（I-cache）和SIMT Core之间的接口进行
+  //建模。它有一个成员m_valid，用于指示缓冲区是否有有效的指令。它还将指令的warp id记录在m_warp_id中。
+  //因此，当m_valid为0，即指示缓冲区暂时没有有效的指令，可以预取新的指令。注意预取新的指令时，要对新的
+  //指令新建一个 ifetch_Buffer_t 对象，在这里 ifetch_Buffer_t 结构更像是每次取新指令这一行为的建模。
   if (!m_inst_fetch_buffer.m_valid) {
+    //m_L1I是指令缓存（I-cache），在手册中<<三、SIMT Cores>>部分有I-cache的详细图。如果存在就绪访问，
+    //则m_L1I->access_ready()返回true。这里就绪的内存访问代表的是，I-cache含有新的可以就绪的指令。
     if (m_L1I->access_ready()) {
+      //获取I-cache的下次内存访问，返回下一个就绪访问，即返回下一个就绪的指令。
       mem_fetch *mf = m_L1I->next_access();
+      //如果前面 mem_fetch *mf 已经获取了就绪的指令，则证明 mf 所在的warp现在不处于instruction miss
+      //的状态，设置该状态为false。
       m_warp[mf->get_wid()]->clear_imiss_pending();
+      //创建对新指令预取这一行为的对象，传入参数为：
+      //    address_type pc：m_warp[mf->get_wid()]->get_pc()
+      //    unsigned nbytes：mf->get_access_size()
+      //    unsigned warp_id：mf->get_wid()
       m_inst_fetch_buffer =
           ifetch_buffer_t(m_warp[mf->get_wid()]->get_pc(),
                           mf->get_access_size(), mf->get_wid());
@@ -928,29 +951,47 @@ void shader_core_ctx::fetch() {
              (mf->get_addr() -
               PROGRAM_MEM_START));  // Verify that we got the instruction we
                                     // were expecting.
+      //设置指示缓冲区内的指令有效。
       m_inst_fetch_buffer.m_valid = true;
+      //设置上次取指的时钟周期。
       m_warp[mf->get_wid()]->set_last_fetch(m_gpu->gpu_sim_cycle);
       delete mf;
     } else {
       // find an active warp with space in instruction buffer that is not
       // already waiting on a cache miss and get next 1-2 instructions from
       // i-cache...
+      //在指令缓冲区中找到一个有指示缓冲空间的活跃warp，该空间尚未等待缓存未命中，并从I-cache中获
+      //取下一个1-2条指令。查找下一个warp时，采取轮询机制：
+      //    (m_last_warp_fetched + 1 + i) % m_config->max_warps_per_shader;
       for (unsigned i = 0; i < m_config->max_warps_per_shader; i++) {
+        //轮询机制获取下一个活跃warp。
         unsigned warp_id =
             (m_last_warp_fetched + 1 + i) % m_config->max_warps_per_shader;
 
         // this code checks if this warp has finished executing and can be
-        // reclaimed
+        // reclaimed.
+        //下面的代码检查这个warp是否已经完成执行并且可以回收，各条件：
+        //    m_warp[warp_id]->hardware_done()检查这个warp是否已经完成执行并且可以回收；
+        //    m_scoreboard->pendingWrites(warp_id)返回记分牌的reg_table中是否有挂起的写入；
+        //    m_warp[warp_id]->done_exit()返回线程退出的标识。
         if (m_warp[warp_id]->hardware_done() &&
             !m_scoreboard->pendingWrites(warp_id) &&
-            !m_warp[warp_id]->done_exit()) {
+            !m_warp[warp_id]->done_exit()) 
+        {
+          //
           bool did_exit = false;
+          //对一个warp内的所有线程进行循环。
           for (unsigned t = 0; t < m_config->warp_size; t++) {
+            //tid是线程编号，这个编号是一个Shader Core内所有线程的索引，而不仅是warp内部的0~31。
             unsigned tid = warp_id * m_config->warp_size + t;
+            //如果tid号线程处于活跃状态。
             if (m_threadState[tid].m_active == true) {
+              //
               m_threadState[tid].m_active = false;
+              //返回线程所在的CTA的ID。
               unsigned cta_id = m_warp[warp_id]->get_cta_id();
               if (m_thread[tid] == NULL) {
+                //如果该线程信息为空，则注册该线程退出。
                 register_cta_thread_exit(cta_id, m_warp[warp_id]->get_kernel_info());
               } else {
                 register_cta_thread_exit(cta_id,
@@ -969,7 +1010,8 @@ void shader_core_ctx::fetch() {
         // this code fetches instructions from the i-cache or generates memory
         if (!m_warp[warp_id]->functional_done() &&
             !m_warp[warp_id]->imiss_pending() &&
-            m_warp[warp_id]->ibuffer_empty()) {
+            m_warp[warp_id]->ibuffer_empty()) 
+        {
           address_type pc;
           pc = m_warp[warp_id]->get_pc();
           address_type ppc = pc + PROGRAM_MEM_START;
@@ -2806,15 +2848,26 @@ void ldst_unit::cycle() {
   }
 }
 
+/*
+注册CTA内线程的退出。
+*/
 void shader_core_ctx::register_cta_thread_exit(unsigned cta_num,
                                                kernel_info_t *kernel) {
   assert(m_cta_status[cta_num] > 0);
+  //m_cta_status是Shader Core内的CTA的状态，MAX_CTA_PER_SHADER是每个Shader Core内的最大可并发
+  //CTA个数。m_cta_status[i]里保存了第i个CTA中包含的活跃线程总数量，该数量 <= CTA的总线程数量。
+  //这里由于需要注册单个线程的退出，因此第i个CTA中包含的活跃线程总数量应当减1。
   m_cta_status[cta_num]--;
+  //如果m_cta_status[cta_num]=0即第cta_num号CTA内没有活跃的线程。
   if (!m_cta_status[cta_num]) {
     // Increment the completed CTAs
+    //增加已经完成的CTA数量。
     m_stats->ctas_completed++;
+    //增加已经完成的CTA数量。
     m_gpu->inc_completed_cta();
+    //减小活跃的CTA数量。
     m_n_active_cta--;
+    //
     m_barriers.deallocate_barrier(cta_num);
     shader_CTA_count_unlog(m_sid, 1);
 
@@ -2823,7 +2876,7 @@ void shader_core_ctx::register_cta_thread_exit(unsigned cta_num,
         "GPGPU-Sim uArch: Finished CTA #%u (%lld,%lld), %u CTAs running\n",
         cta_num, m_gpu->gpu_sim_cycle, m_gpu->gpu_tot_sim_cycle,
         m_n_active_cta);
-
+    //一旦没有活跃的CTA后，代表当前kernel已经执行完。
     if (m_n_active_cta == 0) {
       SHADER_DPRINTF(
           LIVENESS,
@@ -2835,6 +2888,7 @@ void shader_core_ctx::register_cta_thread_exit(unsigned cta_num,
       if (kernel != m_kernel) {
         assert(m_kernel == NULL || !m_gpu->kernel_more_cta_left(m_kernel));
       }
+      //m_kernel是运行在当前SIMT Core上的内核函数。
       m_kernel = NULL;
     }
 
@@ -3530,10 +3584,22 @@ void shader_core_config::set_pipeline_latency() {
   max_tensor_core_latency = tensor_latency;
 }
 
+/*
+Shader Core/SIMT Core向前推进一个时钟周期。
+*/
 void shader_core_ctx::cycle() {
+  //如果这个SIMT Core处于非活跃状态，且已经执行完成，时钟周期不向前推进。
   if (!isactive() && get_not_completed() == 0) return;
 
   m_stats->shader_cycles[m_sid]++;
+  //每个内核时钟周期，shader_core_ctx::cycle()都被调用，以模拟SIMT Core的一个周期。这个函数调用一
+  //组成员函数，按相反的顺序模拟内核的流水线阶段，以模拟流水线效应：
+  //     fetch()             倒数第一执行
+  //     decode()            倒数第二执行
+  //     issue()             倒数第三执行
+  //     read_operand()      倒数第四执行
+  //     execute()           倒数第五执行
+  //     writeback()         倒数第六执行
   writeback();
   execute();
   read_operands();
@@ -3684,7 +3750,10 @@ void barrier_set_t::allocate_barrier(unsigned cta_id, warp_set_t warps) {
   }
 }
 
-// during cta deallocation
+/*
+During cta deallocation.
+
+*/
 void barrier_set_t::deallocate_barrier(unsigned cta_id) {
   cta_to_warp_t::iterator w = m_cta_to_warps.find(cta_id);
   if (w == m_cta_to_warps.end()) return;
@@ -3938,16 +4007,29 @@ void shader_core_ctx::get_icnt_power_stats(long &n_simt_to_mem,
   n_mem_to_simt += m_stats->n_mem_to_simt[m_sid];
 }
 
+/*
+返回绑定在当前Shader Core的kernel的内核函数信息，kernel_info_t对象。
+*/
 kernel_info_t* shd_warp_t::get_kernel_info() const { return m_shader->get_kernel_info(); }
 
+/*
+返回warp已经执行完毕的标志，已经完成的线程数量=warp的大小时，就代表该warp已经完成。
+*/
 bool shd_warp_t::functional_done() const {
   return get_n_completed() == m_warp_size;
 }
 
+/*
+这段代码检查这个warp是否已经完成执行并且可以回收。
+*/
 bool shd_warp_t::hardware_done() const {
   return functional_done() && stores_done() && !inst_in_pipeline();
 }
 
+/*
+返回warp是否由于（warp已经执行完毕且在等待新内核初始化、CTA处于barrier、memory barrier、还有未完成
+的原子操作）四个条件处于等待状态。
+*/
 bool shd_warp_t::waiting() {
   if (functional_done()) {
     // waiting to be initialized with a kernel
@@ -4341,9 +4423,14 @@ simt_core_cluster::simt_core_cluster(class gpgpu_sim *gpu, unsigned cluster_id,
   m_mem_config = mem_config;
 }
 
+/*
+simt_core_cluster即SIMT Core集群向前推进一个时钟周期。
+*/
 void simt_core_cluster::core_cycle() {
+  //对SIMT Core集群中的每一个单独的SIMT Core循环。
   for (std::list<unsigned>::iterator it = m_core_sim_order.begin();
        it != m_core_sim_order.end(); ++it) {
+    //SIMT Core集群中的每一个单独的SIMT Core都向前推进一个时钟周期。
     m_core[*it]->cycle();
   }
 
