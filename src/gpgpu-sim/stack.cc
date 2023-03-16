@@ -26,6 +26,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+/*
+stack.h/.cc 已停止使用。
+*/
+
 #include "stack.h"
 
 #include <assert.h>
