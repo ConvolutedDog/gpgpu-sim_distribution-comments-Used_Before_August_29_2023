@@ -2654,8 +2654,12 @@ class exec_shader_core_ctx : public shader_core_ctx {
                                                const warp_inst_t *pI);
 };
 
+/*
+SIMT Core集群类。
+*/
 class simt_core_cluster {
  public:
+  //构造函数。
   simt_core_cluster(class gpgpu_sim *gpu, unsigned cluster_id,
                     const shader_core_config *config,
                     const memory_config *mem_config, shader_core_stats *stats,
