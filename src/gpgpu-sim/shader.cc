@@ -3733,18 +3733,27 @@ barrier_set_t::barrier_set_t(shader_core_ctx *shader,
   }
 }
 
-// during cta allocation
+/*
+During cta allocation.
+为CTA分配屏障资源。当知道了某个CTA中包含了哪些warps，就可以分配用于cta_id标识的CTA屏障的资源。传入的参数：
+    unsigned cta_id：CTA编号；
+    warp_set_t warps：单个CTA内的所有warp数量大小的位图。
+*/
 void barrier_set_t::allocate_barrier(unsigned cta_id, warp_set_t warps) {
   assert(cta_id < m_max_cta_per_core);
+  //m_cta_to_warps是Map<CTA ID，单个CTA内的所有warp数量大小的位图>。
   cta_to_warp_t::iterator w = m_cta_to_warps.find(cta_id);
+  //在本函数运行之前，cta不应该已经是活跃的或已经分配了屏障资源。
   assert(w == m_cta_to_warps.end());  // cta should not already be active or
                                       // allocated barrier resources
+  //赋值，在m_cta_to_warps里为cta_id标识的CTA赋值位图。
   m_cta_to_warps[cta_id] = warps;
   assert(m_cta_to_warps.size() <=
          m_max_cta_per_core);  // catch cta's that were not properly deallocated
-
+  //
   m_warp_active |= warps;
   m_warp_at_barrier &= ~warps;
+  //
   for (unsigned i = 0; i < m_max_barriers_per_cta; i++) {
     m_bar_id_to_warps[i] &= ~warps;
   }
@@ -4433,7 +4442,8 @@ void simt_core_cluster::core_cycle() {
     //SIMT Core集群中的每一个单独的SIMT Core都向前推进一个时钟周期。
     m_core[*it]->cycle();
   }
-
+  //simt_core_sim_order: Select the simulation order of cores in a cluster.
+  //选择集群中SIMT Core的模拟顺序。在配置中默认为1，采用循环调度。
   if (m_config->simt_core_sim_order == 1) {
     m_core_sim_order.splice(m_core_sim_order.end(), m_core_sim_order,
                             m_core_sim_order.begin());
@@ -4480,9 +4490,14 @@ unsigned simt_core_cluster::get_n_active_cta() const {
   return n;
 }
 
+/*
+返回SIMT Core集群中的活跃SM的数量。
+*/
 unsigned simt_core_cluster::get_n_active_sms() const {
   unsigned n = 0;
+  //对集群中的所有SIMT Core进行循环。
   for (unsigned i = 0; i < m_config->n_simt_cores_per_cluster; i++)
+    //m_core[i]->isactive()为1时，代表m_core[i]是活跃的，即该SM活跃。
     n += m_core[i]->isactive();
   return n;
 }
