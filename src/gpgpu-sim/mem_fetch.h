@@ -33,6 +33,15 @@
 #include "../abstract_hardware_model.h"
 #include "addrdec.h"
 
+/*
+mem_fetch内存访问请求的类型，它被定义为：
+  enum mf_type {
+    READ_REQUEST = 0,  //读请求
+    WRITE_REQUEST,     //写请求
+    READ_REPLY,        //读响应  // send to shader
+    WRITE_ACK          //写确认
+  };
+*/
 enum mf_type {
   READ_REQUEST = 0,
   WRITE_REQUEST,
@@ -51,29 +60,40 @@ enum mf_type {
 #undef MF_TUP_END
 
 class memory_config;
+
 /*
-mem_fetch定义了一个模拟内存请求的通信结构。
+mem_fetch定义了一个模拟内存请求的通信结构。更像是一个内存请求的行为。
 */
 class mem_fetch {
  public:
+  //构造函数。
+  //mem_access_t 包含时序模拟器中每个内存访问的信息。该类包含内存访问的类型、请求的地址、数据的大小
+  //以及访问内存的warp的活动掩码等信息。该类被用作mem_fetch类的参数之一，该类基本上为每个内存访问实
+  //例化。这个类是用于两个不同级别的内存之间的接口，并将两者互连。
   mem_fetch(const mem_access_t &access, const warp_inst_t *inst,
             unsigned ctrl_size, unsigned wid, unsigned sid, unsigned tpc,
             const memory_config *config, unsigned long long cycle,
             mem_fetch *original_mf = NULL, mem_fetch *original_wr_mf = NULL);
+  //析构函数。
   ~mem_fetch();
-
+  //设置内存请求的状态，和状态变化所处的时钟周期。
   void set_status(enum mem_fetch_status status, unsigned long long cycle);
+  //设置内存访问请求响应的类型，内存访问请求中包含四种类型：读请求、写请求、读响应、写确认。这里是设
+  //置读响应或者是写确认。
   void set_reply() {
     assert(m_access.get_type() != L1_WRBK_ACC &&
            m_access.get_type() != L2_WRBK_ACC);
+    //如果内存访问请求的类型是读请求，将其设置为读响应。
     if (m_type == READ_REQUEST) {
       assert(!get_is_write());
       m_type = READ_REPLY;
+    //如果内存访问请求的类型是写请求，将其设置为写确认。
     } else if (m_type == WRITE_REQUEST) {
       assert(get_is_write());
       m_type = WRITE_ACK;
     }
   }
+  //执行原子操作。
   void do_atomic();
 
   void print(FILE *fp, bool print_inst = true) const;
@@ -133,48 +153,78 @@ class mem_fetch {
 
  private:
   // request source information
+  //以下是请求源信息。
+  //请求的唯一的ID，mem_fetch对象被创建时，赋值为sm_next_mf_request_uid。这个值被初始化为1，每当下
+  //一个mem_fetch对象创建时，这个值递增加1。
   unsigned m_request_uid;
+  //
   unsigned m_sid;
+  //
   unsigned m_tpc;
+  //请求的warp ID。
   unsigned m_wid;
 
   // where is this request now?
+  //mem_fetch_status定义了内存请求的状态。m_status变量保存了请求所处的状态。
   enum mem_fetch_status m_status;
+  //内存请求状态变化的时刻，变化所处的时钟周期。
   unsigned long long m_status_change;
 
   // request type, address, size, mask
+  //mem_access_t包含时序模拟器中每个内存访问的信息。该类包含内存访问的类型、请求的地址、数据的大小以
+  //及访问内存的warp的活动掩码等信息。该类被用作mem_fetch类的参数之一，该类基本上为每个内存访问实例
+  //化。这个类是用于两个不同级别的内存之间的接口，并将两者互连。
   mem_access_t m_access;
+  //写请求的数据大小，以字节为单位。
   unsigned m_data_size;  // how much data is being written
+  //所有这些元数据在硬件中的大小（不一定与mem_fetch的实际大小匹配）。
   unsigned
       m_ctrl_size;  // how big would all this meta data be in hardware (does not
                     // necessarily match actual size of mem_fetch)
+  //DRAM分区内的线性物理地址（partition bank select bits被挤出）。
   new_addr_type
       m_partition_addr;  // linear physical address *within* dram partition
                          // (partition bank select bits squeezed out)
+  //原始物理地址（即解码的DRAM chip-row-bank-column地址）。
   addrdec_t m_raw_addr;  // raw physical address (i.e., decoded DRAM
                          // chip-row-bank-column address)
+  //mem_fetch内存访问请求的类型，它被定义为：
+  //  enum mf_type {
+  //    READ_REQUEST = 0,  //读请求
+  //    WRITE_REQUEST,     //写请求
+  //    READ_REPLY,        //读响应  // send to shader
+  //    WRITE_ACK          //写确认
+  //  };
   enum mf_type m_type;
 
-  // statistics
+  // statistics-统计数据。
+  //在mem_fetch对象创建时设置为gpu_sim_cycle+gpu_tot_sim_cycle。
   unsigned
       m_timestamp;  // set to gpu_sim_cycle+gpu_tot_sim_cycle at struct creation
+  //当推到icnt到Shader Core上时，设置为gpu_sim_cycle+gpu_tot_sim_cycle；仅用于读取。
   unsigned m_timestamp2;  // set to gpu_sim_cycle+gpu_tot_sim_cycle when pushed
                           // onto icnt to shader; only used for reads
+  //启用固定的icnt延迟模式时，设置为gpu_sim_cycle+interconnect_latency。
   unsigned m_icnt_receive_time;  // set to gpu_sim_cycle + interconnect_latency
                                  // when fixed icnt latency mode is enabled
 
-  // requesting instruction (put last so mem_fetch prints nicer in gdb)
+  // requesting instruction (put last so mem_fetch prints nicer in gdb).
+  //内存请求的指令（放在最后，以便mem_fetch在gdb中打印得更好）。
   warp_inst_t m_inst;
-
+  //每次内存访问请求都有唯一的ID，这个值被初始化为1，每当下一个mem_fetch对象创建时，这个值递增加1。
   static unsigned sm_next_mf_request_uid;
-
+  //内存的配置信息，从gpu-sim.cc中读取gpgpusim.config参数。
   const memory_config *m_mem_config;
+  //以字节为单位指定flit_size。这用于根据传递给icnt_push()函数的数据包大小来确定每个数据包的微片数。
   unsigned icnt_flit_size;
 
+  //该指针是在L2 cache中将请求划分为sector requests时设置（如果req size > L2 sector size），此
+  //指针指向原始请求。
   mem_fetch
       *original_mf;  // this pointer is set up when a request is divided into
                      // sector requests at L2 cache (if the req size > L2 sector
                      // size), so the pointer refers to the original request
+  //当使用fetch-on-write策略时，该指针指向原始写请求。
   mem_fetch *original_wr_mf;  // this pointer refers to the original write req,
                               // when fetch-on-write policy is used
 };
