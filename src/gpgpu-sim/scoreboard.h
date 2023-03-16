@@ -58,6 +58,8 @@ class Scoreboard {
 
   // keeps track of pending writes to registers
   // indexed by warp id, reg_id => pending write count
+  //跟踪对寄存器的写入挂起。
+  //按warp id索引，reg_id=>挂起的写入计数。
   std::vector<std::set<unsigned> > reg_table;
   // Register that depend on a long operation (global, local or tex memory)
   std::vector<std::set<unsigned> > longopregs;
