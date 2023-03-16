@@ -29,6 +29,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+/*
+gpu-sim.cc 将GPGPU-Sim中不同的时序模型粘在一起。它包含了支持多个时钟域的实现，并实现了线程块调度器。
+*/
+
 #include "gpu-sim.h"
 
 #include <math.h>
@@ -975,11 +979,11 @@ bool gpgpu_sim::hit_max_cta_count() const {
 }
 
 /*
-该函数用于检查指定的内核是否有更多的CTA（Compute Thread Array）可以执行。如果还有更多的CTA可以执行
-，则函数返回true；如果没有更多的CTA可以执行，则函数返回false。若已经达到GPU模拟过程中最大的CTA限制
+该函数用于检查指定的内核是否有更多的CTA（Compute Thread Array）需要执行。如果还有更多的CTA需要执行
+，则函数返回true；如果没有更多的CTA需要执行，则函数返回false。若已经达到GPU模拟过程中最大的CTA限制
 数（由gpgpu_sim::hit_max_cta_count()判断），则没有剩余的CTA，返回False；若kernel非空，且kernel->
 no_more_ctas_to_run()为false即kernel自己还可有多余CTA执行，则返回True。no_more_ctas_to_run()函数
-指示当前没有更多的CTA（Compute Thread Array）可以执行。 
+指示当前没有更多的CTA（Compute Thread Array）需要执行。 
 */
 bool gpgpu_sim::kernel_more_cta_left(kernel_info_t *kernel) const {
   if (hit_max_cta_count()) return false;
@@ -990,11 +994,11 @@ bool gpgpu_sim::kernel_more_cta_left(kernel_info_t *kernel) const {
 }
 
 /*
-该函数用于检查当前是否还有更多的CTA（Compute Thread Array）可以执行。它检查当前活跃的CTA数量，并返
-回是否有更多CTA可以执行。如果已达到GPU模拟限制最大的CTA数（由gpgpu_sim::hit_max_cta_count()判断），
+该函数用于检查当前是否还有更多的CTA（Compute Thread Array）需要执行。它检查当前活跃的CTA数量，并返
+回是否有更多CTA需要执行。如果已达到GPU模拟限制最大的CTA数（由gpgpu_sim::hit_max_cta_count()判断），
 则没有剩余的CTA，返回False；如果某个m_running_kernels向量里的kernel非空，且kernel->
 no_more_ctas_to_run()为false即kernel自己还可有多余CTA执行，则返回True。no_more_ctas_to_run()函数
-指示当前没有更多的CTA（Compute Thread Array）可以执行。
+指示当前没有更多的CTA（Compute Thread Array）需要执行。
 */
 bool gpgpu_sim::get_more_cta_left() const {
   if (hit_max_cta_count()) return false;
@@ -1026,15 +1030,17 @@ m_last_issued_kernel内部变量表示最近一次发出的内核。它的值是
 息，包括内核名称，参数，线程数，块数等。
 */
 kernel_info_t *gpgpu_sim::select_kernel() {
-  //如果该内核非空，且该内核可有更多的CTA（Compute Thread Array）运行，且其m_kernel_TB_latency为
+  //如果该内核非空，且该内核有更多的CTA（Compute Thread Array）需要运行，且其m_kernel_TB_latency为
   //零，则m_last_issued_kernel可以被优先选择。如果不满足这些条件，则会从所有正在运行的内核中选择。
+  //m_kernel_TB_latency表示从内核启动到内核完成执行所需要的时间，如果这个值不为零，则代表这个内核尚未
+  //执行完，则可以被调度执行。
   if (m_running_kernels[m_last_issued_kernel] &&
       !m_running_kernels[m_last_issued_kernel]->no_more_ctas_to_run() &&
       !m_running_kernels[m_last_issued_kernel]->m_kernel_TB_latency) {
-    //get_uid()返回一个唯一的32位整数，用于标识不同的GPU线程。
+    //get_uid()返回一个唯一的32位整数，用于标识不同的GPU内核（每个内核有一个独立的id表示，即uid）。
     unsigned launch_uid = m_running_kernels[m_last_issued_kernel]->get_uid();
-    //m_executed_kernel_uids存储了所有已经执行的内核的唯一标识符，即uid。std::find函数如果没在已经
-    //执行完毕的内核列表中找到该内核，则说明它还没被执行完，可以被选择执行。
+    //m_executed_kernel_uids存储了所有已经执行完毕的内核的唯一标识符，即uid。std::find函数如果没在
+    //已经执行完毕的内核列表中找到该内核，则说明它还没被执行完，可以被选择执行。
     if (std::find(m_executed_kernel_uids.begin(), m_executed_kernel_uids.end(),
                   launch_uid) == m_executed_kernel_uids.end()) {
       //gpu_tot_sim_cycle变量表示当前的仿真周期，即从仿真开始到当前的总仿真时间。gpu_sim_cycle变量
@@ -1045,6 +1051,10 @@ kernel_info_t *gpgpu_sim::select_kernel() {
       //新内核执行时使用，这样一个内核一个内核的累加时间。
       //同时，m_running_kernels[m_last_issued_kernel]的状态更新为executed，把其uid压入m_executed
       //_kernel_uids，把其name压入m_executed_kernel_names。
+
+      //下面这句话的意思是，gpu_sim_cycle代表着上一次执行的内核的延迟，gpu_tot_sim_cycle代表着上一次
+      //执行的内核之前的所有内核的执行时间，因此当前内核的开始启动时间即为二者相加。gpgpu_sim::cycle()
+      //每过一拍将gpu_sim_cycle++。
       m_running_kernels[m_last_issued_kernel]->start_cycle =
           gpu_sim_cycle + gpu_tot_sim_cycle;
       m_executed_kernel_uids.push_back(launch_uid);
@@ -1054,14 +1064,19 @@ kernel_info_t *gpgpu_sim::select_kernel() {
     return m_running_kernels[m_last_issued_kernel];
   }
   //m_last_issued_kernel不满足被优先选择执行的条件时，则从所有正在运行的内核中选择，选择策略是如下方
-  //式计算(n + m_last_issued_kernel + 1) % m_config.max_concurrent_kernel。
-  //max_concurrent_kernel表示模拟的GPU上可能并发执行的最大内核数量。
+  //式计算(n + m_last_issued_kernel + 1) % m_config.max_concurrent_kernel。即顺序选择上一次发出的
+  //m_last_issued_kernel在m_running_kernels中的下一个编号的内核，依次轮询。max_concurrent_kernel
+  //表示模拟的GPU上可能并发执行的最大内核数量。
   for (unsigned n = 0; n < m_running_kernels.size(); n++) {
     unsigned idx =
         (n + m_last_issued_kernel + 1) % m_config.max_concurrent_kernel;
+    //如果idx标识的内核有更多的CTA需要执行，且其执行延迟m_kernel_TB_latency尚未减到0，即它还在执行，
+    //则可以发出。
     if (kernel_more_cta_left(m_running_kernels[idx]) &&
         !m_running_kernels[idx]->m_kernel_TB_latency) {
       m_last_issued_kernel = idx;
+      //gpu_sim_cycle变量表示执行此内核所需的时钟周期数（以shader core的时钟域为单位），gpgpu_sim::
+      //cycle()每过一拍将gpu_sim_cycle++。
       m_running_kernels[idx]->start_cycle = gpu_sim_cycle + gpu_tot_sim_cycle;
       // record this kernel for stat print if it is the first time this kernel
       // is selected for execution
@@ -1167,17 +1182,21 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   m_power_stats =
       new power_stat_t(m_shader_config, average_pipeline_duty_cycle, active_sms,
                        m_shader_stats, m_memory_config, m_memory_stats);
-
+  //在此内核中执行的指令数。
   gpu_sim_insn = 0;
+  //迄今为止为所有启动的内核模拟的总周期数（以核心时钟为单位）。
   gpu_tot_sim_insn = 0;
   //即总发出的CTA（Compute Thread Array）亦即线程块数量。
   gpu_tot_issued_cta = 0;
+  //已经完成的CTA的总数。
   gpu_completed_cta = 0;
   //已经启动的CTA数量。
   m_total_cta_launched = 0;
+  //GPU进入死锁状态的标志。
   gpu_deadlock = false;
-
+  //互连网络输出到DRAM Channel的暂停周期数。
   gpu_stall_dramfull = 0;
+  //由于互连拥塞导致DRAM Channel停滞的周期数。
   gpu_stall_icnt2sh = 0;
   partiton_reqs_in_parallel = 0;
   partiton_reqs_in_parallel_total = 0;
@@ -1357,7 +1376,7 @@ void gpgpu_sim::reinit_clock_domains(void) {
 */
 bool gpgpu_sim::active() {
   //gpu_max_cycle_opt选项配置：在达到最大周期数后尽早终止GPU模拟。
-  //gpu_sim_cycle是执行当前阶段的指令的延迟。
+  //gpu_sim_cycle是执行当前阶段的指令的延迟，gpgpu_sim::cycle()每过一拍将gpu_sim_cycle++。
   //gpu_tot_sim_cycle是执行当前阶段之前的所有前绪指令的延迟。
   //两项延迟相加 >= gpu_max_cycle_opt说明会达到最大周期数，返回False。
   if (m_config.gpu_max_cycle_opt &&
@@ -1400,7 +1419,7 @@ bool gpgpu_sim::active() {
 */
 void gpgpu_sim::init() {
   // run a CUDA grid on the GPU microarchitecture simulator
-  //执行当前阶段的指令的延迟。
+  //执行当前阶段的指令的延迟，gpgpu_sim::cycle()每过一拍将gpu_sim_cycle++。
   gpu_sim_cycle = 0;
   //执行当前阶段的指令的总数，比如将各个warp的相加。
   gpu_sim_insn = 0;
@@ -2181,8 +2200,11 @@ void dram_t::dram_log(int task) {
   }
 }
 
-// Find next clock domain and increment its time
+/*
+Find next clock domain and increment its time. 找到下一个时钟域并推进它的时间。
+*/ 
 int gpgpu_sim::next_clock_domain(void) {
+  //四个时钟域不同步，每次需要挑选出最小运行时间的一个时钟域进行节拍的推进。
   double smallest = min3(core_time, icnt_time, dram_time);
   int mask = 0x00;
   if (l2_time <= smallest) {
@@ -2227,10 +2249,13 @@ unsigned long long g_single_step =
       simt_core_cluster::issue_block2core()
         shader_core_ctx::issue_block2core()
           trace_shader_core_ctx::init_warps()
+
+在每个模拟周期中，都会调用gpgpu_sim::cycle()，此函数不接受任何参数。
 */
 void gpgpu_sim::cycle() {
+  //下一个需要推进的时钟域的时钟域掩码。因为每个时钟域是异步的，不是同时更新的。
   int clock_mask = next_clock_domain();
-
+  //SIMT Core时钟域更新。
   if (clock_mask & CORE) {
     // shader core loading (pop from ICNT into core) follows CORE clock
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
@@ -2313,11 +2338,14 @@ void gpgpu_sim::cycle() {
   if (clock_mask & ICNT) {
     icnt_transfer();
   }
-
+  //如果推进的是SIMT Core时钟域。
   if (clock_mask & CORE) {
     // L1 cache + shader core pipeline stages
     m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
+    //对所有的SIMT Core进行循环，更新每个Core的状态。
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
+      //如果get_not_completed()为1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，代
+      //表这个SIMT Core还有剩余的CTA需要取执行。
       if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
         m_cluster[i]->core_cycle();
         *active_sms += m_cluster[i]->get_n_active_sms();
