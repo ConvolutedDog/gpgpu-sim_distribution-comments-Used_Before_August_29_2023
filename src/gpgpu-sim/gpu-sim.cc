@@ -2084,6 +2084,7 @@ void shader_core_ctx::issue_block2core(kernel_info_t &kernel) {
   kernel.inc_running();
 
   // find a free CTA context
+  //free_cta_hw_id指没有被占用的CTA ID。
   unsigned free_cta_hw_id = (unsigned)-1;
 
   unsigned max_cta_per_core;
@@ -2091,7 +2092,9 @@ void shader_core_ctx::issue_block2core(kernel_info_t &kernel) {
     max_cta_per_core = kernel_max_cta_per_shader;
   else
     max_cta_per_core = m_config->max_cta_per_core;
+  //对单个SIMT Core中的所有CTA循环，查找处于非活跃状态的CTA，将其编号赋值到free_cta_hw_id。
   for (unsigned i = 0; i < max_cta_per_core; i++) {
+    //m_cta_status[i] == 0代表第i个CTA内活跃的线程数量为0，即第i个CTA已经不活跃了。
     if (m_cta_status[i] == 0) {
       free_cta_hw_id = i;
       break;
@@ -2175,6 +2178,7 @@ void shader_core_ctx::issue_block2core(kernel_info_t &kernel) {
   }
   // now that we know which warps are used in this CTA, we can allocate
   // resources for use in CTA-wide barrier operations
+  //既然我们知道了在这个CTA中使用了哪些warp，我们就可以分配用于CTA总数宽的屏障资源。
   m_barriers.allocate_barrier(free_cta_hw_id, warps);
 
   // initialize the SIMT stacks and fetch hardware
@@ -2342,12 +2346,15 @@ void gpgpu_sim::cycle() {
   if (clock_mask & CORE) {
     // L1 cache + shader core pipeline stages
     m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
-    //对所有的SIMT Core进行循环，更新每个Core的状态。
+    //对SIMT Core集群中所有的SIMT Core进行循环，更新每个Core的状态。
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
       //如果get_not_completed()为1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，代
       //表这个SIMT Core还有剩余的CTA需要取执行。
       if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
+        //m_cluster[i]向前推进一个周期。
         m_cluster[i]->core_cycle();
+        //get_n_active_sms()返回SIMT Core集群中的活跃SM的数量。active_sms是SIMT Core集群中的活跃SM的
+        //数量。
         *active_sms += m_cluster[i]->get_n_active_sms();
       }
       // Update core icnt/cache stats for AccelWattch
