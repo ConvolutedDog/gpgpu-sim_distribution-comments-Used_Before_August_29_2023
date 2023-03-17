@@ -24,9 +24,9 @@
 #define K 16
 
 // GEMM configuration.
-#define M_TILES 8
-#define N_TILES 8
-#define K_TILES 8
+#define M_TILES 12
+#define N_TILES 12
+#define K_TILES 12
 
 #define M_TOTAL (M * M_TILES)
 #define N_TOTAL (N * N_TILES)
@@ -37,14 +37,14 @@
 //__global__ void WMMAINT8()
 using namespace nvcuda;
 
-__host__ void InitMatrix(half *A, half *B, half *C)
+__host__ void InitMatrix(half *A, half *B, float *C)
 {
 	for (int i = 0; i < M_TOTAL*K_TOTAL; i++)
 		A[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
 	for (int i = 0; i < K_TOTAL*N_TOTAL; i++)
 		B[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
 	for (int i = 0; i < M_TOTAL*N_TOTAL; i++)
-		C[i] = __float2half(0.1);//rand() % 1000 / 1000.0f;
+		C[i] = 0.1;//rand() % 1000 / 1000.0f;
 #if (print_matrices==1)
 	// print initial matrices
 	printf("Matrix A:\n");
@@ -62,7 +62,7 @@ __host__ void InitMatrix(half *A, half *B, half *C)
 	printf("Matrix C:\n");
 	for (int i = 0; i < M_TOTAL; i++){
 		for (int j = 0; j < N_TOTAL; j++)
-			printf(" %3.1f", __half2float(A[i*N_TOTAL+j]));
+			printf(" %3.1f", A[i*N_TOTAL+j]);
 		printf("\n");
 	}
 #endif
@@ -70,17 +70,17 @@ __host__ void InitMatrix(half *A, half *B, half *C)
 
 
 
-__global__ void WMMAF16TensorCore(half *A, half *B, half *C, half *D)
+__global__ void WMMAF16TensorCore(half *A, half *B, float *C, float *D)
 {
 	int ix = (blockIdx.x * blockDim.x + threadIdx.x)/WARP_SIZE;
 	int iy = (blockIdx.y * blockDim.y + threadIdx.y);
 	
 	wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
 	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::col_major> b_frag;
-	wmma::fragment<wmma::accumulator, M, N, K, half> ab_frag;
-	wmma::fragment<wmma::accumulator, M, N, K, half> c_frag;
+	wmma::fragment<wmma::accumulator, M, N, K, float> ab_frag;
+	wmma::fragment<wmma::accumulator, M, N, K, float> c_frag;
 	
-	wmma::fill_fragment(ab_frag, __float2half(0.0f));
+	wmma::fill_fragment(ab_frag, 0.0f);
 
 	// AB = A*B
 	int a_col, a_row, b_col, b_row, c_col, c_row;
@@ -114,7 +114,7 @@ __global__ void WMMAF16TensorCore(half *A, half *B, half *C, half *D)
 	}
 }
 
-cudaError_t CalcWMMA(half *A, half *B, half *C, half *D)
+cudaError_t CalcWMMA(half *A, half *B, float *C, float *D)
 {
 	cudaError_t cuda_status;
 	dim3 gridDim, blockDim;
@@ -162,13 +162,13 @@ int main()
 	//Matrix on host
 	half *A_cpu;
 	half *B_cpu;
-	half *C_cpu;
-	half *D_cpu;
+	float *C_cpu;
+	float *D_cpu;
 
 	A_cpu = (half*)malloc(sizeof(half) * M_TOTAL * K_TOTAL);
     B_cpu = (half*)malloc(sizeof(half) * K_TOTAL * N_TOTAL);
-    C_cpu = (half*)malloc(sizeof(half) * M_TOTAL * N_TOTAL);
-	D_cpu = (half*)malloc(sizeof(half) * M_TOTAL * N_TOTAL);
+    C_cpu = (float*)malloc(sizeof(float) * M_TOTAL * N_TOTAL);
+	D_cpu = (float*)malloc(sizeof(float) * M_TOTAL * N_TOTAL);
 
 	// Init matrix A B C on host
 	//InitHostMatrix(host_A, host_B, host_C);
@@ -181,23 +181,23 @@ int main()
 	// Matrix on device
 	half *A;
 	half *B;
-	half *C;
-	half *D;
+	float *C;
+	float *D;
 
 	// CUDA Unified Memory 
 	//cudaMallocManaged((void **)&A, sizeof(half) * M_TOTAL * K_TOTAL);
 	//cudaMallocManaged((void **)&B, sizeof(half) * K_TOTAL * N_TOTAL);
-	//cudaMallocManaged((void **)&C, sizeof(half) * M_TOTAL * N_TOTAL);
-	//cudaMallocManaged((void **)&D, sizeof(half) * M_TOTAL * N_TOTAL);
+	//cudaMallocManaged((void **)&C, sizeof(float) * M_TOTAL * N_TOTAL);
+	//cudaMallocManaged((void **)&D, sizeof(float) * M_TOTAL * N_TOTAL);
 	cudaMalloc((void **)&A, sizeof(half) * M_TOTAL * K_TOTAL);
 	cudaMalloc((void **)&B, sizeof(half) * K_TOTAL * N_TOTAL);
-	cudaMalloc((void **)&C, sizeof(half) * M_TOTAL * N_TOTAL);
-	cudaMalloc((void **)&D, sizeof(half) * M_TOTAL * N_TOTAL);
+	cudaMalloc((void **)&C, sizeof(float) * M_TOTAL * N_TOTAL);
+	cudaMalloc((void **)&D, sizeof(float) * M_TOTAL * N_TOTAL);
 
 	cudaMemcpy(A, A_cpu, sizeof(half) * M_TOTAL * K_TOTAL, cudaMemcpyHostToDevice);
 	cudaMemcpy(B, B_cpu, sizeof(half) * K_TOTAL * N_TOTAL, cudaMemcpyHostToDevice);
-	cudaMemcpy(C, C_cpu, sizeof(half) * M_TOTAL * N_TOTAL, cudaMemcpyHostToDevice);
-	cudaMemcpy(D, D_cpu, sizeof(half) * M_TOTAL * N_TOTAL, cudaMemcpyHostToDevice);
+	cudaMemcpy(C, C_cpu, sizeof(float) * M_TOTAL * N_TOTAL, cudaMemcpyHostToDevice);
+	cudaMemcpy(D, D_cpu, sizeof(float) * M_TOTAL * N_TOTAL, cudaMemcpyHostToDevice);
 	
 	// computing gemm using tensor core
 	printf("[*] Computing D = A * B + C with Tensor Cores...\n");
@@ -212,7 +212,7 @@ int main()
 	// Todo: Add a function to verify the result by using the result of CPU version implementation.
 
 #if (print_matrices==1)
-	cudaMemcpy(D_cpu, D, sizeof(half) * M_TOTAL * N_TOTAL, cudaMemcpyDeviceToHost);
+	cudaMemcpy(D_cpu, D, sizeof(float) * M_TOTAL * N_TOTAL, cudaMemcpyDeviceToHost);
 	// print initial matrices
 	printf("Result D:\n");
 	for (int i = 0; i < M_TOTAL; i++){
