@@ -872,9 +872,13 @@ void shader_core_stats::visualizer_print(gzFile visualizer_file) {
                 check ptx_ir.h to verify this does not overlap \
                 other memory spaces */
 
+/*
+依据PC值，获取指令。
+*/
 const warp_inst_t *exec_shader_core_ctx::get_next_inst(unsigned warp_id,
                                                        address_type pc) {
   // read the inst from the functional model
+  //ptx_fetch_inst(pc)的功能是依据PC值，获取指令。
   return m_gpu->gpgpu_ctx->ptx_fetch_inst(pc);
 }
 
@@ -890,27 +894,48 @@ const active_mask_t &exec_shader_core_ctx::get_active_mask(
   return m_simt_stack[warp_id]->get_active_mask();
 }
 
+/*
+Shader Core中的解码阶段与m_inst_fetch_buffer结构密切相关，后者充当获取和解码阶段之间的通信管道。解码
+阶段请参见以下手册说明：
+    “解码阶段只需检查shader_core_ctx::m_inst_fetch_buffer，并开始将解码的指令（当前配置每个周期最多
+    解码两条指令）存储在指令缓冲区条目（m_ibuffer，shd_warp_t::ibuffer_entry的对象）中，该条目对应于
+    shader-core_ctx::m_inst_fetch_bbuffer中的warp。”
+*/
 void shader_core_ctx::decode() {
+  //m_inst_fetch_buffer的定义为：
+  //    ifetch_buffer_t m_inst_fetch_buffer;
+  //指令获取缓冲区。指令获取缓冲区（ifetch_Buffer_t）对指令缓存（I-cache）和SIMT Core之间的接口进行
+  //建模。它有一个成员m_valid，用于指示缓冲区是否有有效的指令。它还将指令的warp id记录在m_warp_id中。
+  //因此，当m_valid为0，即指示缓冲区暂时没有有效的指令；当m_valid为1，即指示缓冲区已经有有效的指令。
   if (m_inst_fetch_buffer.m_valid) {
-    // decode 1 or 2 instructions and place them into ibuffer
+    // decode 1 or 2 instructions and place them into ibuffer.
+    //解码1~2条指令，并把它们放到I-Buffer中。
+    //获取m_inst_fetch_buffer中存储的指令的PC值。
     address_type pc = m_inst_fetch_buffer.m_pc;
+    //get_next_inst()依据PC值，获取指令。
     const warp_inst_t *pI1 = get_next_inst(m_inst_fetch_buffer.m_warp_id, pc);
+    //将一条新指令存入I-Bufer。I-Buffer有两个槽，pI1加入槽0，pI2加入槽1。
     m_warp[m_inst_fetch_buffer.m_warp_id]->ibuffer_fill(0, pI1);
+    //增加在流水线中执行的指令数。
     m_warp[m_inst_fetch_buffer.m_warp_id]->inc_inst_in_pipeline();
     if (pI1) {
+      //m_num_decoded_insn是SM上解码后的指令数，pI1指令有效的话，增加1。
       m_stats->m_num_decoded_insn[m_sid]++;
-      if ((pI1->oprnd_type == INT_OP) || (pI1->oprnd_type == UN_OP))  { //these counters get added up in mcPat to compute scheduler power
+      if ((pI1->oprnd_type == INT_OP) || (pI1->oprnd_type == UN_OP))  { 
+        //these counters get added up in mcPat to compute scheduler power.
         m_stats->m_num_INTdecoded_insn[m_sid]++;
       } else if (pI1->oprnd_type == FP_OP) {
         m_stats->m_num_FPdecoded_insn[m_sid]++;
       }
+      //获取下一条指令。
       const warp_inst_t *pI2 =
           get_next_inst(m_inst_fetch_buffer.m_warp_id, pc + pI1->isize);
       if (pI2) {
         m_warp[m_inst_fetch_buffer.m_warp_id]->ibuffer_fill(1, pI2);
         m_warp[m_inst_fetch_buffer.m_warp_id]->inc_inst_in_pipeline();
         m_stats->m_num_decoded_insn[m_sid]++;
-        if ((pI1->oprnd_type == INT_OP) || (pI1->oprnd_type == UN_OP))  { //these counters get added up in mcPat to compute scheduler power
+        if ((pI1->oprnd_type == INT_OP) || (pI1->oprnd_type == UN_OP))  { 
+          //these counters get added up in mcPat to compute scheduler power.
           m_stats->m_num_INTdecoded_insn[m_sid]++;
         } else if (pI2->oprnd_type == FP_OP) {
           m_stats->m_num_FPdecoded_insn[m_sid]++;
@@ -922,7 +947,18 @@ void shader_core_ctx::decode() {
 }
 
 /*
-SIMT Core的取指令时钟周期。
+SIMT Core的取指令时钟周期。fetch()函数生成指令内存请求，并从一级指令缓存中收集提取的指令。提取的指令
+被放入指令提取缓冲区。以下的逻辑为：
+  * 如果m_inst_fetch_buffer为空（无效）：
+    ** 如果指令缓存中有指令（已准备就绪）：
+      *** 将指令放入m_inst_fetch_buffer。
+    ** 否则，即如果缓存中没有就绪指令：
+      *** 遍历所有硬件warp（2048/32）。如果warp正在运行，没有等待instruction cache missing，并且
+          其指令缓冲区为空：则生成内存获取请求。
+      *** 检查是否可以在指令缓存中直接获取：
+        **** 如果是，则将指令放入m_inst_fetch_buffer。
+        **** 否则，硬件warp被设置为指令缓存丢失状态。
+  * 运行m_L1I->cycle()函数。
 */
 void shader_core_ctx::fetch() {
   //m_inst_fetch_buffer的定义为：
@@ -960,8 +996,9 @@ void shader_core_ctx::fetch() {
       // find an active warp with space in instruction buffer that is not
       // already waiting on a cache miss and get next 1-2 instructions from
       // i-cache...
-      //在指令缓冲区中找到一个指示有缓冲空间的活跃warp，该空间尚未等待缓存未命中，并从I-cache中获
-      //取下一个1-2条指令。查找下一个warp时，采取轮询机制：
+      //在指令缓冲区中找到一个指示有指令获取缓冲空间（上面的m_inst_fetch_buffer）的活跃warp，该
+      //空间尚未由于缓存未命中而等待，并从I-cache中获取下一个1-2条指令。查找下一个warp时，采取轮
+      //询机制：
       //    (m_last_warp_fetched + 1 + i) % m_config->max_warps_per_shader;
       for (unsigned i = 0; i < m_config->max_warps_per_shader; i++) {
         //轮询机制获取下一个活跃warp。
@@ -1022,23 +1059,35 @@ void shader_core_ctx::fetch() {
             m_warp[warp_id]->ibuffer_empty()) 
         {
           address_type pc;
+          //获取当前warp正在执行指令的PC值。
           pc = m_warp[warp_id]->get_pc();
+          //上一步获取的PC值，是从0开始编号的，需要加上指令在内存中存储的首地址0xF0000000才能到
+          //I-Cache中取指令，因为I-Cache的起始地址就是0xF0000000。
           address_type ppc = pc + PROGRAM_MEM_START;
           unsigned nbytes = 16;
+          //offset_in_block是PC标识的指令在I-Cache Line中的偏移。
           unsigned offset_in_block =
               pc & (m_config->m_L1I_config.get_line_sz() - 1);
+          //如果这个偏移+nbytes > I-Cache Line Size，就说明一行Cache存不下nbyte大小的数据，重
+          //新设置nbytes的值。
           if ((offset_in_block + nbytes) > m_config->m_L1I_config.get_line_sz())
             nbytes = (m_config->m_L1I_config.get_line_sz() - offset_in_block);
 
           // TODO: replace with use of allocator
           // mem_fetch *mf = m_mem_fetch_allocator->alloc()
+          //创建内存访问行为这个对象，该内存访问对象的类型是INST_ACC_R即从I-Cache中读指令，地址
+          //为PC值，nbytes字节大小，非写访问。
           mem_access_t acc(INST_ACC_R, ppc, nbytes, false, m_gpu->gpgpu_ctx);
           mem_fetch *mf = new mem_fetch(
               acc, NULL /*we don't have an instruction yet*/, READ_PACKET_SIZE,
               warp_id, m_sid, m_tpc, m_memory_config,
               m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
           std::list<cache_event> events;
+
+          // Check if the instruction is already in the instruction cache.
           enum cache_request_status status;
+          //perfect_inst_const_cache代表完美的inst和const缓存模式，缓存中的所有inst和const都
+          //命中，在V100配置文件里开启。
           if (m_config->perfect_inst_const_cache){
             status = HIT;
             shader_cache_access_log(m_sid, INSTRUCTION, 0);
@@ -1047,7 +1096,7 @@ void shader_core_ctx::fetch() {
             status = m_L1I->access(
                 (new_addr_type)ppc, mf,
                 m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle, events);
-
+          //完美的inst和const缓存模式，缓存中的所有inst都HIT。
           if (status == MISS) {
             m_last_warp_fetched = warp_id;
             m_warp[warp_id]->set_imiss_pending();
@@ -1067,7 +1116,7 @@ void shader_core_ctx::fetch() {
       }
     }
   }
-
+  //取指完成后，L1 I-Cache向前推进一拍。
   m_L1I->cycle();
 }
 
@@ -1112,6 +1161,17 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
   m_warp[warp_id]->set_next_pc(next_inst->pc + next_inst->isize);
 }
 
+/*
+在每个SIMT Core中，都有可配置数量的调度器单元。函数shader_core_ctx::issue()在这些单元上进行迭代，
+其中每一个单元都执行scheduler_unit::cycle()，在这里对warp进行轮循。在scheduler_unit::cycle()中，
+指令使用shader_core_ctx::issue_warp()函数被发射到其合适的执行流水线。在这个函数中，指令通过调用
+shader_core_ctx::func_exec_inst()在功能上被执行，SIMT堆栈（m_simt_stack[warp_id]）是通过调用
+simt_stack::update()被更新。另外，在这个函数中，由于barrier的存在，通过shd_warp_t:set_membar()
+和barrier_set_t::warp_reaches_barrier来保持/释放warp。另一方面，寄存器被Scoreboard::reserve-
+Registers()保留，以便以后被记分牌算法使用。scheduler_unit::m_sp_out,scheduler_unit::m_sfu_out, 
+scheduler_unit::m_mem_out指向SP、SFU和Mem流水线接收的发射阶段和执行阶段之间的第一个流水线寄存器。
+这就是为什么在使用shader_core_ctx::issue_warp()向其相应的流水线发出任何指令之前要检查它们。
+*/
 void shader_core_ctx::issue() {
   // Ensure fair round robin issu between schedulers
   unsigned j;
@@ -2241,10 +2301,16 @@ bool ldst_unit::memory_cycle(warp_inst_t &inst,
   return inst.accessq_empty();
 }
 
+/*
+LD/ST单元的响应FIFO中的数据包数 >= GPU配置的弹出缓冲器中的最大响应包数。
+*/
 bool ldst_unit::response_buffer_full() const {
   return m_response_fifo.size() >= m_config->ldst_unit_response_queue_size;
 }
 
+/*
+将mem_fetch *mf放入SIMT Core集群的数据响应FIFO。
+*/
 void ldst_unit::fill(mem_fetch *mf) {
   mf->set_status(
       IN_SHADER_LDST_RESPONSE_FIFO,
@@ -2487,15 +2553,6 @@ void pipelined_simd_unit::issue(register_set &source_reg) {
   // source_reg.move_out_to(m_dispatch_reg);
   simd_function_unit::issue(source_reg);
 }
-
-/*
-    virtual void issue( register_set& source_reg )
-    {
-        //move_warp(m_dispatch_reg,source_reg);
-        //source_reg.move_out_to(m_dispatch_reg);
-        simd_function_unit::issue(source_reg);
-    }
-*/
 
 void ldst_unit::init(mem_fetch_interface *icnt,
                      shader_core_mem_fetch_allocator *mf_allocator,
@@ -3976,6 +4033,9 @@ bool shader_core_ctx::ldst_unit_response_buffer_full() const {
   return m_ldst_unit->response_buffer_full();
 }
 
+/*
+SIMT Core集群接收预取的data数据包。
+*/
 void shader_core_ctx::accept_ldst_unit_response(mem_fetch *mf) {
   m_ldst_unit->fill(mf);
 }
@@ -4444,7 +4504,9 @@ void simt_core_cluster::core_cycle() {
     m_core[*it]->cycle();
   }
   //simt_core_sim_order: Select the simulation order of cores in a cluster.
-  //选择集群中SIMT Core的模拟顺序。在配置中默认为1，采用循环调度。
+  //simt_core_sim_order是选择集群中SIMT Core的模拟顺序时，在配置中默认为1，采用循环调度。这里由于在
+  //本时钟周期内，是从m_core_sim_order.begin()开始调度，因此为了实现轮询调度，将begin()位置移动到最
+  //末尾。这样，下次就是从begin+1位置的SIMT Core开始调度。
   if (m_config->simt_core_sim_order == 1) {
     m_core_sim_order.splice(m_core_sim_order.end(), m_core_sim_order,
                             m_core_sim_order.begin());
@@ -4460,9 +4522,13 @@ unsigned simt_core_cluster::max_cta(const kernel_info_t &kernel) {
   return m_config->n_simt_cores_per_cluster * m_config->max_cta(kernel);
 }
 
+/*
+返回当前SIMT Core集群中尚未完成的线程个数。
+*/
 unsigned simt_core_cluster::get_not_completed() const {
   unsigned not_completed = 0;
   for (unsigned i = 0; i < m_config->n_simt_cores_per_cluster; i++)
+    //m_core[i]->get_not_completed()是返回当前SIMT Core集群中第i个SM上未完成的线程数。
     not_completed += m_core[i]->get_not_completed();
   return not_completed;
 }
@@ -4668,7 +4734,8 @@ void simt_core_cluster::icnt_cycle() {
       if (!m_core[cid]->fetch_unit_response_buffer_full()) {
         //对指令预取的响应FIFO弹出一个数据包。
         m_response_fifo.pop_front();
-        //m_core[cid]指向的SIMT Core接收这个预取的指令数据包。
+        //m_core[cid]指向的SIMT Core集群接收这个预取的指令数据包，把mf放到cid标识的SIMT Core集群
+        //的L1 I-Cache。
         m_core[cid]->accept_fetch_response(mf);
       }
     } else {
@@ -4678,18 +4745,20 @@ void simt_core_cluster::icnt_cycle() {
       if (!m_core[cid]->ldst_unit_response_buffer_full()) {
         //对数据预取的响应FIFO弹出一个数据包。
         m_response_fifo.pop_front();
-        //
+        //统计Memory Latency Statistics.
         m_memory_stats->memlatstat_read_done(mf);
-        //m_core[cid]指向的SIMT Core接收这个预取的指令数据包。
+        //m_core[cid]指向的SIMT Core集群接收这个预取的data数据包。
         m_core[cid]->accept_ldst_unit_response(mf);
       }
     }
   }
   //m_config->n_simt_ejection_buffer_size是弹出缓冲区中的数据包数。如果响应FIFO大小 < 弹出缓冲区中
-  //的数据包数。
+  //的数据包数，则弹出缓冲区可以继续向SIMT Core集群的响应FIFO里弹出下一个数据包。弹出缓冲区指的是，[互
+  //连网络->弹出缓冲区->SIMT Core集群]的中间节点。
   if (m_response_fifo.size() < m_config->n_simt_ejection_buffer_size) {
-    //
+    //这里mem_fetch *mf指的是弹出缓冲区继续向SIMT Core集群的响应FIFO里弹出的下一个数据包。
     mem_fetch *mf = (mem_fetch *)::icnt_pop(m_cluster_id);
+    //如果没弹出来，说明弹出缓冲区为空，互连网络没有新的数据包要向SIMT Core集群传输。
     if (!mf) return;
     assert(mf->get_tpc() == m_cluster_id);
     assert(mf->get_type() == READ_REPLY || mf->get_type() == WRITE_ACK);
@@ -4697,12 +4766,16 @@ void simt_core_cluster::icnt_cycle() {
     // The packet size varies depending on the type of request:
     // - For read request and atomic request, the packet contains the data
     // - For write-ack, the packet only has control metadata
+    //数据包大小因请求类型而异：
+    // - 对于读取请求和原子请求，数据包包含数据；
+    // - 对于写确认，数据包只有控制元数据。
     unsigned int packet_size =
         (mf->get_is_write()) ? mf->get_ctrl_size() : mf->size();
     m_stats->m_incoming_traffic_stats->record_traffic(mf, packet_size);
     mf->set_status(IN_CLUSTER_TO_SHADER_QUEUE,
                    m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle);
     // m_memory_stats->memlatstat_read_done(mf,m_shader_config->max_warps_per_shader);
+    //响应FIFO将数据包mf加入到FIFO底部，先入先出顺序。
     m_response_fifo.push_back(mf);
     m_stats->n_mem_to_simt[m_cluster_id] += mf->get_num_flits(false);
   }
