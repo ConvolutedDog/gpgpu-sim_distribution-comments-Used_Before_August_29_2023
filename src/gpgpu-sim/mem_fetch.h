@@ -115,11 +115,13 @@ class mem_fetch {
   unsigned get_sub_partition_id() const { return m_raw_addr.sub_partition; }
   bool get_is_write() const { return m_access.is_write(); }
   unsigned get_request_uid() const { return m_request_uid; }
+  //获取内存访问请求源的SIMT Core的ID。
   unsigned get_sid() const { return m_sid; }
   unsigned get_tpc() const { return m_tpc; }
   unsigned get_wid() const { return m_wid; }
   bool istexture() const;
   bool isconst() const;
+  //返回对存储器进行的访存类型，
   enum mf_type get_type() const { return m_type; }
   bool isatomic() const;
 
@@ -128,7 +130,24 @@ class mem_fetch {
   unsigned get_timestamp() const { return m_timestamp; }
   unsigned get_return_timestamp() const { return m_timestamp2; }
   unsigned get_icnt_receive_time() const { return m_icnt_receive_time; }
-
+  //m_access是mem_access_t对象，mem_access_t包含时序模拟器中每个内存访问的信息。该类包含内存访问
+  //的类型、请求的地址、数据的大小以及访问内存的warp的活动掩码等信息。该类被用作mem_fetch类的参数之
+  //一，该类基本上为每个内存访问实例化。这个类是用于两个不同级别的内存之间的接口，并将两者互连。
+  //m_access.get_type()返回对存储器进行的访存类型mem_access_type：
+  //mem_access_type定义了在时序模拟器中对不同类型的存储器进行不同的访存类型：
+  //    MA_TUP(GLOBAL_ACC_R),        从global memory读
+  //    MA_TUP(LOCAL_ACC_R),         从local memory读
+  //    MA_TUP(CONST_ACC_R),         从常量缓存读
+  //    MA_TUP(TEXTURE_ACC_R),       从纹理缓存读
+  //    MA_TUP(GLOBAL_ACC_W),        向global memory写
+  //    MA_TUP(LOCAL_ACC_W),         向local memory写
+  //    MA_TUP(L1_WRBK_ACC),         L1缓存write back
+  //    MA_TUP(L2_WRBK_ACC),         L2缓存write back
+  //    MA_TUP(INST_ACC_R),          从指令缓存读
+  //    MA_TUP(L1_WR_ALLOC_R),       L1缓存write-allocate（cache写不命中，将主存中块调入cache，
+  //                                 写入该cache块）
+  //    MA_TUP(L2_WR_ALLOC_R),       L2缓存write-allocate
+  //    MA_TUP(NUM_MEM_ACCESS_TYPE), 存储器访问的类型总数
   enum mem_access_type get_access_type() const { return m_access.get_type(); }
   const active_mask_t &get_access_warp_mask() const {
     return m_access.get_warp_mask();
@@ -157,7 +176,7 @@ class mem_fetch {
   //请求的唯一的ID，mem_fetch对象被创建时，赋值为sm_next_mf_request_uid。这个值被初始化为1，每当下
   //一个mem_fetch对象创建时，这个值递增加1。
   unsigned m_request_uid;
-  //
+  //m_sid表示内存访问请求源的SIMT Core的ID。
   unsigned m_sid;
   //
   unsigned m_tpc;
