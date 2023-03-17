@@ -960,7 +960,7 @@ void shader_core_ctx::fetch() {
       // find an active warp with space in instruction buffer that is not
       // already waiting on a cache miss and get next 1-2 instructions from
       // i-cache...
-      //在指令缓冲区中找到一个有指示缓冲空间的活跃warp，该空间尚未等待缓存未命中，并从I-cache中获
+      //在指令缓冲区中找到一个指示有缓冲空间的活跃warp，该空间尚未等待缓存未命中，并从I-cache中获
       //取下一个1-2条指令。查找下一个warp时，采取轮询机制：
       //    (m_last_warp_fetched + 1 + i) % m_config->max_warps_per_shader;
       for (unsigned i = 0; i < m_config->max_warps_per_shader; i++) {
@@ -978,7 +978,7 @@ void shader_core_ctx::fetch() {
             !m_scoreboard->pendingWrites(warp_id) &&
             !m_warp[warp_id]->done_exit()) 
         {
-          //
+          //did_exit是标识当前循环内的warp是否退出，待后面该warp的各个线程都停止后，就设置为真。
           bool did_exit = false;
           //对一个warp内的所有线程进行循环。
           for (unsigned t = 0; t < m_config->warp_size; t++) {
@@ -986,7 +986,8 @@ void shader_core_ctx::fetch() {
             unsigned tid = warp_id * m_config->warp_size + t;
             //如果tid号线程处于活跃状态。
             if (m_threadState[tid].m_active == true) {
-              //
+              //m_threadState[i]标识第i号线程是否处于活跃状态。m_threadState是一个数组，它包含
+              //着整个Shader Core的所有的线程的状态。
               m_threadState[tid].m_active = false;
               //返回线程所在的CTA的ID。
               unsigned cta_id = m_warp[warp_id]->get_cta_id();
@@ -994,20 +995,28 @@ void shader_core_ctx::fetch() {
                 //如果该线程信息为空，则注册该线程退出。
                 register_cta_thread_exit(cta_id, m_warp[warp_id]->get_kernel_info());
               } else {
-                register_cta_thread_exit(cta_id,
-                                         &(m_thread[tid]->get_kernel()));
+                register_cta_thread_exit(cta_id, &(m_thread[tid]->get_kernel()));
               }
+              //未完成的线程数（当此Shader Core上的所有线程都完成时，==0）。由于这里注册了线程的
+              //退出，因此该线程已完成执行，未完成的线程数需要减去1。
               m_not_completed -= 1;
+              //m_active_threads是Shader Core上活跃线程的位图，同理将tid位置零，取消活跃状态。
               m_active_threads.reset(tid);
+              //did_exit是标识当前循环内的warp已经退出。
               did_exit = true;
             }
           }
+          //当前循环内的warp已经退出，设置它退出的标志。
           if (did_exit) m_warp[warp_id]->set_done_exit();
+          //m_active_warps是在此Shader Core中的活跃warp的总数，应该减1。
           --m_active_warps;
           assert(m_active_warps >= 0);
         }
 
         // this code fetches instructions from the i-cache or generates memory
+        //此代码从I-Cache获取指令或生成内存访问。functional_done()返回warp是否已经执行完毕，已
+        //经完成的线程数量=warp的大小时，就代表该warp已经完成。imiss_pending()返回warp是否因指
+        //令缓冲未命中而挂起的状态标识。ibuffer_empty()返回I-Bufer是否为空。
         if (!m_warp[warp_id]->functional_done() &&
             !m_warp[warp_id]->imiss_pending() &&
             m_warp[warp_id]->ibuffer_empty()) 
@@ -1861,6 +1870,9 @@ void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
   inst.completed(m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle);
 }
 
+/*
+
+*/
 void shader_core_ctx::writeback() {
   unsigned max_committed_thread_instructions =
       m_config->warp_size *
@@ -2693,28 +2705,7 @@ unsigned ldst_unit::clock_multiplier() const {
   else
     return m_config->mem_warp_parts;
 }
-/*
-void ldst_unit::issue( register_set &reg_set )
-{
-        warp_inst_t* inst = *(reg_set.get_ready());
-   // stat collection
-   m_core->mem_instruction_stats(*inst);
 
-   // record how many pending register writes/memory accesses there are for this
-instruction assert(inst->empty() == false); if (inst->is_load() and
-inst->space.get_type() != shared_space) { unsigned warp_id = inst->warp_id();
-      unsigned n_accesses = inst->accessq_count();
-      for (unsigned r = 0; r < MAX_OUTPUT_VALUES; r++) {
-         unsigned reg_id = inst->out[r];
-         if (reg_id > 0) {
-            m_pending_writes[warp_id][reg_id] += n_accesses;
-         }
-      }
-   }
-
-   pipelined_simd_unit::issue(reg_set);
-}
-*/
 void ldst_unit::cycle() {
   writeback();
   //for (int i = 0; i < m_config->reg_file_port_throughput; ++i)
@@ -3954,14 +3945,24 @@ void shader_core_ctx::broadcast_barrier_reduction(unsigned cta_id,
   }
 }
 
+/*
+返回预取单元响应buffer是否已满。这里一直非满。
+*/
 bool shader_core_ctx::fetch_unit_response_buffer_full() const { return false; }
 
+/*
+SIMT Core接收预取的指令数据包，该数据包是mf定义的访存行为。
+*/
 void shader_core_ctx::accept_fetch_response(mem_fetch *mf) {
   mf->set_status(IN_SHADER_FETCHED,
                  m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle);
+  //m_L1I是指令的L1-Cache。
   m_L1I->fill(mf, m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle);
 }
 
+/*
+返回LDST单元响应buffer是否已满。
+*/
 bool shader_core_ctx::ldst_unit_response_buffer_full() const {
   return m_ldst_unit->response_buffer_full();
 }
@@ -4608,26 +4609,71 @@ void simt_core_cluster::icnt_inject_request_packet(class mem_fetch *mf) {
                 mf->size());
 }
 
+/*
+simt_core_cluster::icnt_cycle()方法将内存请求从互连网络推入simt核心集群的响应FIFO。它还从FIFO弹
+出请求，并将它们发送到相应内核的指令缓存或LDST单元。
+
+每个SIMT Core集群都有一个响应FIFO，用于保存从互连网络发出的数据包。数据包被定向到SIMT Core的指令缓
+存（如果它是为指令获取未命中提供服务的内存响应）或其内存流水线（memory pipeline，LDST 单元）。数据
+包以先进先出方式拿出。如果SIMT Core无法接受FIFO头部的数据包，则响应FIFO将停止。为了在LDST单元上生成
+内存请求，每个SIMT Core都有自己的注入端口接入互连网络。但是，注入端口缓冲区由SIMT Core集群所有SIMT 
+Core共享。
+*/
 void simt_core_cluster::icnt_cycle() {
+  //如果响应FIFO非空。
   if (!m_response_fifo.empty()) {
+    //从响应FIFO头部推出一个数据包 mf。m_response_fifo被定义为：
+    //    std::list<mem_fetch *> m_response_fifo;
+    //mem_fetch定义了一个模拟内存请求的通信结构。更像是一个内存请求的行为。
     mem_fetch *mf = m_response_fifo.front();
+    //mf->get_sid()获取内存访问请求源的SIMT Core的ID。m_config是SIMT Core集群中的Shader Core的配
+    //置。m_config->sid_to_cid(sid)是依据SM的ID，获取SIMT Core集群的ID。即cid为SIMT Core集群的ID。
     unsigned cid = m_config->sid_to_cid(mf->get_sid());
+    //mf->get_access_type()返回对存储器进行的访存类型mem_access_type，mem_access_type定义了在时序
+    //模拟器中对不同类型的存储器进行不同的访存类型：
+    //    MA_TUP(GLOBAL_ACC_R),        从global memory读
+    //    MA_TUP(LOCAL_ACC_R),         从local memory读
+    //    MA_TUP(CONST_ACC_R),         从常量缓存读
+    //    MA_TUP(TEXTURE_ACC_R),       从纹理缓存读
+    //    MA_TUP(GLOBAL_ACC_W),        向global memory写
+    //    MA_TUP(LOCAL_ACC_W),         向local memory写
+    //    MA_TUP(L1_WRBK_ACC),         L1缓存write back
+    //    MA_TUP(L2_WRBK_ACC),         L2缓存write back
+    //    MA_TUP(INST_ACC_R),          从指令缓存读
+    //    MA_TUP(L1_WR_ALLOC_R),       L1缓存write-allocate（cache写不命中，将主存中块调入cache，
+    //                                 写入该cache块）
+    //    MA_TUP(L2_WR_ALLOC_R),       L2缓存write-allocate
+    //    MA_TUP(NUM_MEM_ACCESS_TYPE), 存储器访问的类型总数
     if (mf->get_access_type() == INST_ACC_R) {
-      // instruction fetch response
+      //如果mf->get_access_type() = 从指令缓存读，则是指令预取响应。
+      // instruction fetch response.
+      //m_core为SIMT Core集群定义的所有SIMT Core，一个二维shader_core_ctx矩阵，第一维代表集群ID，
+      //第二维代表SIMT Core ID。fetch_unit_response_buffer_full()返回预取单元响应buffer是否已满。
+      //这里这个函数一直非满，即下面的循环始终执行。
       if (!m_core[cid]->fetch_unit_response_buffer_full()) {
+        //对指令预取的响应FIFO弹出一个数据包。
         m_response_fifo.pop_front();
+        //m_core[cid]指向的SIMT Core接收这个预取的指令数据包。
         m_core[cid]->accept_fetch_response(mf);
       }
     } else {
-      // data response
+      //如果mf->get_access_type() ≠ 从指令缓存读，则是数据提取响应。
+      // data response.
+      //ldst_unit_response_buffer_full()返回LDST单元响应buffer是否已满。
       if (!m_core[cid]->ldst_unit_response_buffer_full()) {
+        //对数据预取的响应FIFO弹出一个数据包。
         m_response_fifo.pop_front();
+        //
         m_memory_stats->memlatstat_read_done(mf);
+        //m_core[cid]指向的SIMT Core接收这个预取的指令数据包。
         m_core[cid]->accept_ldst_unit_response(mf);
       }
     }
   }
+  //m_config->n_simt_ejection_buffer_size是弹出缓冲区中的数据包数。如果响应FIFO大小 < 弹出缓冲区中
+  //的数据包数。
   if (m_response_fifo.size() < m_config->n_simt_ejection_buffer_size) {
+    //
     mem_fetch *mf = (mem_fetch *)::icnt_pop(m_cluster_id);
     if (!mf) return;
     assert(mf->get_tpc() == m_cluster_id);
