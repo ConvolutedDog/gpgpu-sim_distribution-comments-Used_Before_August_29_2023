@@ -413,6 +413,9 @@ enum concrete_scheduler {
   NUM_CONCRETE_SCHEDULERS
 };
 
+/*
+调度单元类。每个对象负责从其warp集中选择一条或多条指令，并发射这些指令进行执行。
+*/
 class scheduler_unit {  // this can be copied freely, so can be used in std
                         // containers.
  public:
@@ -1168,6 +1171,7 @@ struct ifetch_buffer_t {
   }
 
   bool m_valid;
+  //获取的指令的PC值。
   address_type m_pc;
   unsigned m_nbytes;
   unsigned m_warp_id;
@@ -1757,9 +1761,12 @@ class shader_core_config : public core_config {
   unsigned max_dp_latency;
   unsigned max_tensor_core_latency;
 
+  //GPU配置的单个SIMT Core集群中SIMT Core的个数。
   unsigned n_simt_cores_per_cluster;
+  //GPU配置的SIMT Core集群的个数。
   unsigned n_simt_clusters;
-  //弹出缓冲区中的数据包数。
+  //GPU配置的SIMT Core集群的弹出缓冲区中的数据包数。弹出缓冲区指的是，[互连网络->弹出缓冲区->SIMT 
+  //Core集群]的中间节点。
   unsigned n_simt_ejection_buffer_size;
   unsigned ldst_unit_response_queue_size;
 
@@ -2172,6 +2179,7 @@ class shader_core_ctx : public core_t {
   // accessors
   bool fetch_unit_response_buffer_full() const;
   bool ldst_unit_response_buffer_full() const;
+  //返回当前SM未完成的线程数。
   unsigned get_not_completed() const { return m_not_completed; }
   unsigned get_n_active_cta() const { return m_n_active_cta; }
 
