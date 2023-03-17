@@ -501,9 +501,12 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(opp, "-gpgpu_n_cores_per_cluster", OPT_UINT32,
                          &n_simt_cores_per_cluster,
                          "number of simd cores per cluster", "3");
+  //GPU配置的SIMT Core集群的弹出缓冲区中的数据包数。弹出缓冲区指的是，[互连网络->弹出缓冲区->SIMT 
+  //Core集群]的中间节点。
   option_parser_register(opp, "-gpgpu_n_cluster_ejection_buffer_size",
                          OPT_UINT32, &n_simt_ejection_buffer_size,
                          "number of packets in ejection buffer", "8");
+  //LD/ST单元弹出缓冲器中的响应包数。
   option_parser_register(
       opp, "-gpgpu_n_ldst_response_buffer_size", OPT_UINT32,
       &ldst_unit_response_queue_size,
@@ -2365,10 +2368,11 @@ void gpgpu_sim::cycle() {
   if (clock_mask & CORE) {
     // L1 cache + shader core pipeline stages
     m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
-    //对SIMT Core集群中所有的SIMT Core进行循环，更新每个Core的状态。
+    //对GPU中所有的SIMT Core集群进行循环，更新每个集群的状态。
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
-      //如果get_not_completed()为1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，代
-      //表这个SIMT Core还有剩余的CTA需要取执行。
+      //如果get_not_completed()大于1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，
+      //代表这个SIMT Core还有剩余的CTA需要取执行。m_cluster[i]->get_not_completed()返回第i个
+      //SIMT Core集群中尚未完成的线程个数。
       if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
         //当调用simt_core_cluster::core_cycle()时，它会调用其中所有SM内核的循环。
         m_cluster[i]->core_cycle();
