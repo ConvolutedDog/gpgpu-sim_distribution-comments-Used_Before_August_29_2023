@@ -913,7 +913,7 @@ class mem_access_t {
     //    MA_TUP(LOCAL_ACC_W), 向local memory写
     //    MA_TUP(L1_WRBK_ACC), L1缓存write back
     //    MA_TUP(L2_WRBK_ACC), L2缓存write back
-    //    MA_TUP(INST_ACC_R), 从指令缓存读
+    //    MA_TUP(INST_ACC_R), 从指令缓存（I-Cache）读
     //    MA_TUP(L1_WR_ALLOC_R), L1缓存write-allocate（对cache写不命中，将主存中块调入cache，写入
     //                           该cache块）
     //    MA_TUP(L2_WR_ALLOC_R), L2缓存write-allocate
