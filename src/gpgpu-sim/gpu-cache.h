@@ -787,6 +787,8 @@ class cache_config {
     assert(m_valid);
     return get_max_cache_multiplier() * original_m_assoc;
   }
+
+  //Cache分成多个组(set)，每个组分成多个行(way)，每个行存储字节数是line_size。
   void print(FILE *fp) const {
     fprintf(fp, "Size = %d B (%d Set x %d-way x %d byte line)\n",
             m_line_sz * m_nset * m_assoc, m_nset, m_assoc, m_line_sz);
