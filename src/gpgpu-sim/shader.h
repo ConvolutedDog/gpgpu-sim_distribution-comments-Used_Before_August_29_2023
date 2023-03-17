@@ -1202,6 +1202,9 @@ class simd_function_unit {
   std::bitset<MAX_ALU_LATENCY> occupied;
 };
 
+/*
+
+*/
 class pipelined_simd_unit : public simd_function_unit {
  public:
   pipelined_simd_unit(register_set *result_port,
@@ -1394,6 +1397,9 @@ class shader_memory_interface;
 class shader_core_mem_fetch_allocator;
 class cache_t;
 
+/*
+LDST单元类。
+*/
 class ldst_unit : public pipelined_simd_unit {
  public:
   ldst_unit(mem_fetch_interface *icnt,
@@ -1647,9 +1653,11 @@ class shader_core_config : public core_config {
   unsigned num_shader() const {
     return n_simt_clusters * n_simt_cores_per_cluster;
   }
+  //依据SM的ID，获取SIMT Core集群的ID。这里SM的ID，即sid是所有集群的所有SM一起编号的。
   unsigned sid_to_cluster(unsigned sid) const {
     return sid / n_simt_cores_per_cluster;
   }
+  //依据SM的ID，获取SIMT Core集群的ID。这里SM的ID，即sid是所有集群的所有SM一起编号的。
   unsigned sid_to_cid(unsigned sid) const {
     return sid % n_simt_cores_per_cluster;
   }
@@ -1746,6 +1754,7 @@ class shader_core_config : public core_config {
 
   unsigned n_simt_cores_per_cluster;
   unsigned n_simt_clusters;
+  //弹出缓冲区中的数据包数。
   unsigned n_simt_ejection_buffer_size;
   unsigned ldst_unit_response_queue_size;
 
@@ -2547,7 +2556,8 @@ class shader_core_ctx : public core_t {
   std::bitset<MAX_THREAD_PER_SM> m_active_threads;
 
   // thread contexts
-  //
+  //m_threadState[i]标识第i号线程是否处于活跃状态。m_threadState是一个数组，它包含着整个Shader
+  //Core的所有的线程的状态。
   thread_ctx_t *m_threadState;
 
   // interconnect interface
@@ -2555,6 +2565,7 @@ class shader_core_ctx : public core_t {
   shader_core_mem_fetch_allocator *m_mem_fetch_allocator;
 
   // fetch
+  //处理指令预取的I-Cache。
   read_only_cache *m_L1I;  // instruction cache
   int m_last_warp_fetched;
 
@@ -2568,6 +2579,7 @@ class shader_core_ctx : public core_t {
   std::vector<register_set> m_pipeline_reg;
   Scoreboard *m_scoreboard;
   opndcoll_rfu_t m_operand_collector;
+  //在此Shader Core中的活跃warp的总数。
   int m_active_warps;
   std::vector<register_set *> m_specilized_dispatch_reg;
 
@@ -2645,6 +2657,9 @@ class exec_shader_core_ctx : public shader_core_ctx {
                                                const warp_inst_t *pI);
 };
 
+/*
+SIMT Core集群类。
+*/
 class simt_core_cluster {
  public:
   simt_core_cluster(class gpgpu_sim *gpu, unsigned cluster_id,
@@ -2697,14 +2712,23 @@ class simt_core_cluster {
  protected:
   unsigned m_cluster_id;
   gpgpu_sim *m_gpu;
+  //Shader Core的配置。
   const shader_core_config *m_config;
   shader_core_stats *m_stats;
   memory_stats_t *m_memory_stats;
+  //m_core为SIMT Core集群定义的所有SIMT Core，一个二维shader_core_ctx矩阵，第一维代表集群ID，第
+  //二维代表SIMT Core ID。
   shader_core_ctx **m_core;
   const memory_config *m_mem_config;
 
   unsigned m_cta_issue_next_core;
   std::list<unsigned> m_core_sim_order;
+  //每个SIMT Core集群都有一个响应FIFO，用于保存从互连网络发出的数据包。数据包被定向到SIMT Core的
+  //指令缓存（如果它是为指令获取未命中提供服务的内存响应）或其内存流水线（memory pipeline，LDST 
+  //单元）。数据包以先进先出方式拿出。如果SIMT Core无法接受FIFO头部的数据包，则响应FIFO将停止。为
+  //了在LDST单元上生成内存请求，每个SIMT Core都有自己的注入端口接入互连网络。但是，注入端口缓冲区
+  //由SIMT Core集群所有SIMT Core共享。mem_fetch定义了一个模拟内存请求的通信结构。更像是一个内存
+  //请求的行为。
   std::list<mem_fetch *> m_response_fifo;
 };
 
