@@ -678,6 +678,7 @@ class gpgpu_sim : public gpgpu_t {
 
  protected:
   ///// data /////
+  //m_cluster是SIMT Core集群的类。
   class simt_core_cluster **m_cluster;
   class memory_partition_unit **m_memory_partition_unit;
   class memory_sub_partition **m_memory_sub_partition;
