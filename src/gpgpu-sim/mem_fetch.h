@@ -105,6 +105,8 @@ class mem_fetch {
   }
   unsigned get_data_size() const { return m_data_size; }
   void set_data_size(unsigned size) { m_data_size = size; }
+  //对于写确认，数据包只有控制元数据。当前内存访问请求是互连网络传给SIMT Core集群的写确认，数据包仅
+  //包含控制元数据（metadata）。返回该控制元数据的大小。
   unsigned get_ctrl_size() const { return m_ctrl_size; }
   unsigned size() const { return m_data_size + m_ctrl_size; }
   bool is_write() { return m_access.is_write(); }
@@ -113,10 +115,12 @@ class mem_fetch {
   unsigned get_access_size() const { return m_access.get_size(); }
   new_addr_type get_partition_addr() const { return m_partition_addr; }
   unsigned get_sub_partition_id() const { return m_raw_addr.sub_partition; }
+  //当前内存访问请求是互连网络传给SIMT Core集群的写确认，数据包仅包含控制元数据（metadata）。
   bool get_is_write() const { return m_access.is_write(); }
   unsigned get_request_uid() const { return m_request_uid; }
   //获取内存访问请求源的SIMT Core的ID。
   unsigned get_sid() const { return m_sid; }
+  //获取当前内存访问请求的目的端SIMT Core集群的ID。
   unsigned get_tpc() const { return m_tpc; }
   unsigned get_wid() const { return m_wid; }
   bool istexture() const;
@@ -178,7 +182,7 @@ class mem_fetch {
   unsigned m_request_uid;
   //m_sid表示内存访问请求源的SIMT Core的ID。
   unsigned m_sid;
-  //
+  //当前内存访问请求的目的端SIMT Core集群的ID。
   unsigned m_tpc;
   //请求的warp ID。
   unsigned m_wid;
@@ -196,7 +200,9 @@ class mem_fetch {
   mem_access_t m_access;
   //写请求的数据大小，以字节为单位。
   unsigned m_data_size;  // how much data is being written
-  //所有这些元数据在硬件中的大小（不一定与mem_fetch的实际大小匹配）。
+  //对于写确认，数据包只有控制元数据。当前内存访问请求是互连网络传给SIMT Core集群的写确认，数据包仅
+  //包含控制元数据（metadata）。该控制元数据的大小。所有这些元数据在硬件中的大小（不一定与mem_fetch
+  //的实际大小匹配）。
   unsigned
       m_ctrl_size;  // how big would all this meta data be in hardware (does not
                     // necessarily match actual size of mem_fetch)
