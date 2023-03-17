@@ -2251,14 +2251,33 @@ unsigned long long g_single_step =
           trace_shader_core_ctx::init_warps()
 
 在每个模拟周期中，都会调用gpgpu_sim::cycle()，此函数不接受任何参数。
+
+gpgpu_sim::cycle()方法为gpgpu-sim中的所有体系结构组件计时，包括内存分区的队列、DRAM通道和二级缓存。
+1. 代码段:
+       icnt_push(m_shader_config->mem2device(i), mf->get_tpc(), mf, response_size);
+       m_memory_partition_unit[i]->pop();
+   将内存请求从内存分区的L2->icnt队列注入到互连网络中。调用tomory_partition_unit::pop()函数执行原
+   子指令。请求跟踪器还会丢弃该内存请求的条目，指示内存分区已完成对此请求的服务。
+2. 对memory_partition_unit::dram_cycle()的调用将内存请求从L2->dram队列移动到dram通道，dram通道移
+   动到dram->L2队列，并循环芯片外GDDR3 dram内存。
+3. 对memory_partition_unit::push()的调用从互连网络中弹出数据包，并将其传递到内存分区。请求跟踪器会
+   收到该请求的通知。纹理访问被直接推送到icnt->L2队列，而非纹理访问被推送到最小延迟ROP队列。请注意，
+   对icnt->L2和ROP队列的推送操作都受到memory_partition_unit::full()方法中定义的icnt->L2-队列大小
+   的限制。
+4. 对memory_partition_unit::cache_cycle()的调用为二级缓存组计时，并将请求移入或移出二级缓存。下一
+   节描述了memory_partition_unit::cache_cycle()的内部结构。
 */
 void gpgpu_sim::cycle() {
   //下一个需要推进的时钟域的时钟域掩码。因为每个时钟域是异步的，不是同时更新的。
   int clock_mask = next_clock_domain();
   //SIMT Core时钟域更新。
   if (clock_mask & CORE) {
-    // shader core loading (pop from ICNT into core) follows CORE clock
+    // shader core loading (pop from ICNT into core) follows CORE clock.
+    //对所有的SIMT Core集群循环，m_cluster[i]是其中一个集群。Shader Core加载（从ICNT弹出到Core）
+    //遵循核心时钟。
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
+      //simt_core_cluster::icnt_cycle()方法将内存请求从互连网络推入simt核心集群的响应FIFO。它还从
+      //FIFO弹出请求，并将它们发送到相应内核的指令缓存或LDST单元。
       m_cluster[i]->icnt_cycle();
   }
   unsigned partiton_replys_in_parallel_per_cycle = 0;
@@ -2347,7 +2366,9 @@ void gpgpu_sim::cycle() {
       //如果get_not_completed()为1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，代
       //表这个SIMT Core还有剩余的CTA需要取执行。
       if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
+        //当调用simt_core_cluster::core_cycle()时，它会调用其中所有SM内核的循环。
         m_cluster[i]->core_cycle();
+        //增加活跃的SM数量。
         *active_sms += m_cluster[i]->get_n_active_sms();
       }
       // Update core icnt/cache stats for AccelWattch
