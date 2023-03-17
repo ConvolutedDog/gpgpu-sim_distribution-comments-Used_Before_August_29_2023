@@ -1286,11 +1286,15 @@ bool was_write_sent(const std::list<cache_event> &events);
 bool was_read_sent(const std::list<cache_event> &events);
 bool was_writeallocate_sent(const std::list<cache_event> &events);
 
-// Baseline cache
-// Implements common functions for read_only_cache and data_cache
-// Each subclass implements its own 'access' function
+/*
+Baseline cache.
+Implements common functions for read_only_cache and data_cache.
+Each subclass implements its own 'access' function.
+基础版缓存。实现read_only_cache和data_cache的通用功能。需要每个子类实现自己的“访问”功能。
+*/
 class baseline_cache : public cache_t {
  public:
+  //构造函数。
   baseline_cache(const char *name, cache_config &config, int core_id,
                  int type_id, mem_fetch_interface *memport,
                  enum mem_fetch_status status)
@@ -1477,7 +1481,10 @@ class baseline_cache : public cache_t {
   bandwidth_management m_bandwidth_management;
 };
 
-// Read only cache
+/*
+Read only cache.
+只读Cache类。
+*/
 class read_only_cache : public baseline_cache {
  public:
   read_only_cache(const char *name, cache_config &config, int core_id,
