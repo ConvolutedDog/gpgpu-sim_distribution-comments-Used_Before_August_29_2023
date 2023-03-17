@@ -695,6 +695,7 @@ class gpgpu_sim : public gpgpu_t {
 
   unsigned m_last_cluster_issue;
   float *average_pipeline_duty_cycle;
+  //SIMT Core集群中的活跃SM的数量。
   float *active_sms;
   // time of next rising edge
   //下一个上升沿的时刻。
