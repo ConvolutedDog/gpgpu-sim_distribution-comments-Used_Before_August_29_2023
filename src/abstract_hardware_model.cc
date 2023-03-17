@@ -286,6 +286,9 @@ void warp_inst_t::broadcast_barrier_reduction(
   }
 }
 
+/*
+生成warp指令的内存访问请求。
+*/
 void warp_inst_t::generate_mem_accesses() {
   //如果 warp_inst_t 内的指令为空，或者指令非空但操作码为存储屏障，或者访存操作已经生成，则中断执行/跳回。
   if (empty() || op == MEMORY_BARRIER_OP || m_mem_accesses_created) return;
