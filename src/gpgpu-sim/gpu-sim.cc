@@ -2236,6 +2236,8 @@ int gpgpu_sim::next_clock_domain(void) {
 
 void gpgpu_sim::issue_block2core() {
   unsigned last_issued = m_last_cluster_issue;
+  //基本上，所有SIMT Core集群都被遍历。遍历从最后发射的集群开始。对于每个集群，调用issue_block2core，
+  //它返回该集群发射的线程块数。这将增加到成员gpgpu_sim::m_total_cta_launched。
   for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
     unsigned idx = (i + last_issued + 1) % m_shader_config->n_simt_clusters;
     unsigned num = m_cluster[idx]->issue_block2core();
