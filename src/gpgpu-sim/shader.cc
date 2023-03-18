@@ -4569,21 +4569,30 @@ unsigned simt_core_cluster::get_n_active_sms() const {
   return n;
 }
 
+/*
+对所有SIMT Core集群遍历，选择每个集群内的一个SIMT Core，向其发射一个内核。
+*/
 unsigned simt_core_cluster::issue_block2core() {
+  //当前SIMT Core集群发射的线程块的计数。
   unsigned num_blocks_issued = 0;
+  //遍历当前SIMT Core集群内的所有SIMT Core。
   for (unsigned i = 0; i < m_config->n_simt_cores_per_cluster; i++) {
+    //SIMT Core的编号。
     unsigned core =
         (i + m_cta_issue_next_core + 1) % m_config->n_simt_cores_per_cluster;
 
     kernel_info_t *kernel;
     // Jin: fetch kernel according to concurrent kernel setting
-    if (m_config->gpgpu_concurrent_kernel_sm) {  // concurrent kernel on sm
+    if (m_config->gpgpu_concurrent_kernel_sm) {  
+      //支持SM上的并发内核（默认为禁用），在V100配置中禁用。
+      // concurrent kernel on sm
       // always select latest issued kernel
       kernel_info_t *k = m_gpu->select_kernel();
       kernel = k;
     } else {
       // first select core kernel, if no more cta, get a new kernel
       // only when core completes
+      //首先选择一个内核函数，如果该内核函数没有更多的CTA需要执行，就等其结束后换一个新内核。
       kernel = m_core[core]->get_kernel();
       if (!m_gpu->kernel_more_cta_left(kernel)) {
         // wait till current kernel finishes
@@ -4594,7 +4603,7 @@ unsigned simt_core_cluster::issue_block2core() {
         }
       }
     }
-
+    //如果kernel有更多的CTA待执行，且m_core[core]可以发射一个内核函数，发射。
     if (m_gpu->kernel_more_cta_left(kernel) &&
         //            (m_core[core]->get_n_active_cta() <
         //            m_config->max_cta(*kernel)) ) {
