@@ -1777,6 +1777,7 @@ class shader_core_config : public core_config {
   unsigned mem2device(unsigned memid) const { return memid + n_simt_clusters; }
 
   // Jin: concurrent kernel on sm
+  //支持SM上的并发内核（默认为禁用）。
   bool gpgpu_concurrent_kernel_sm;
 
   bool perfect_inst_const_cache;
