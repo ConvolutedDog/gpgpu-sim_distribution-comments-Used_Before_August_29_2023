@@ -1155,7 +1155,7 @@ class inst_t {
 
   address_type reconvergence_pc;  // -1 => not a branch, -2 => use function
                                   // return address
-
+  
   unsigned out[8];
   unsigned outcount;
   unsigned in[24];
