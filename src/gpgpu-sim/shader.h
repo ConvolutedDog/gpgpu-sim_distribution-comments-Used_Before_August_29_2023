@@ -2604,6 +2604,7 @@ class shader_core_ctx : public core_t {
   std::vector<register_set *> m_specilized_dispatch_reg;
 
   // schedule
+  //每个SIMT Core中，都有可配置数量的调度器单元。
   std::vector<scheduler_unit *> schedulers;
 
   // issue
