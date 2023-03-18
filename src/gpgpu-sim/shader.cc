@@ -1175,6 +1175,7 @@ scheduler_unit::m_mem_out指向SP、SFU和Mem流水线接收的发射阶段和�
 void shader_core_ctx::issue() {
   // Ensure fair round robin issu between schedulers
   unsigned j;
+  //对Shader Core里的可配置数量的调度器单元进行迭代，其中每一个单元都执行scheduler_unit::cycle()。
   for (unsigned i = 0; i < schedulers.size(); i++) {
     j = (Issue_Prio + i) % schedulers.size();
     schedulers[j]->cycle();
@@ -1302,6 +1303,9 @@ void scheduler_unit::order_by_priority(
   }
 }
 
+/*
+Shader Core里的单个调度器单元向前推进一拍，执行scheduler_unit::cycle()。
+*/
 void scheduler_unit::cycle() {
   SCHED_DPRINTF("scheduler_unit::cycle()\n");
   bool valid_inst =
