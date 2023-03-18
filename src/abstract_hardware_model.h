@@ -475,38 +475,64 @@ const unsigned MAX_WARP_SIZE = 32;
 //用于在处理一个warp内的线程分支，标记每个线程是否执行某个分支。
 typedef std::bitset<MAX_WARP_SIZE> active_mask_t;
 #define MAX_WARP_SIZE_SIMT_STACK MAX_WARP_SIZE
+//线程掩码，位图，大小是32。
 typedef std::bitset<MAX_WARP_SIZE_SIMT_STACK> simt_mask_t;
 typedef std::vector<address_type> addr_vector_t;
 
+/*
+SIMT 堆栈类。每个SIMT Core中，都有可配置数量的调度器单元。对于每个调度器单元，有一个SIMT堆栈阵列。每
+个SIMT堆栈对应一个warp。
+*/
 class simt_stack {
  public:
   simt_stack(unsigned wid, unsigned warpSize, class gpgpu_sim *gpu);
 
+  //清空m_stack里的所有条目。
   void reset();
+  //功能模拟过程中，用warp的起始PC值（用该warp的首个线程m_thread[warpId * m_warp_size]->get_pc()获
+  //取）线程和其线程掩码用于启动SIMT堆栈。
   void launch(address_type start_pc, const simt_mask_t &active_mask);
+  //在scheduler_unit::cycle()中，指令使用shader_core_ctx::issue_warp()函数被发射到其合适的执行流水
+  //线。在这个函数中，指令通过调用shader_core_ctx::func_exec_inst()在功能上被执行，SIMT栈（m_simt_
+  //stack[warp_id]）通过调用simt_stack::update()被更新。
   void update(simt_mask_t &thread_done, addr_vector_t &next_pc,
               address_type recvg_pc, op_type next_inst_op,
               unsigned next_inst_size, address_type next_inst_pc);
 
+  //返回m_stack队列最末尾加入条目的线程掩码。[最末尾加入条目]即为栈顶top。
   const simt_mask_t &get_active_mask() const;
+  //返回m_stack队列最末尾加入条目的PC值和RPC值。[最末尾加入条目]即为栈顶top。
   void get_pdom_stack_top_info(unsigned *pc, unsigned *rpc) const;
+  //返回m_stack队列最末尾加入条目的RPC值。[最末尾加入条目]即为栈顶top。
   unsigned get_rp() const;
+  //打印SIMT堆栈的每个条目。
   void print(FILE *fp) const;
+  //暂时用不到，以后用到再补充。
   void resume(char *fname);
+  //打印SIMT堆栈的check point。
   void print_checkpoint(FILE *fout) const;
 
  protected:
+  //warp的ID。
   unsigned m_warp_id;
+  //单个warp内的线程数量。
   unsigned m_warp_size;
 
+  //SIMT堆栈条目的类型。在<<通用图形处理器体系结构>>书中有拓展。
   enum stack_entry_type { STACK_ENTRY_TYPE_NORMAL = 0, STACK_ENTRY_TYPE_CALL };
 
+  //SIMT堆栈的条目结构。
   struct simt_stack_entry {
+    //下一条需要被执行指令的PC（Next PC，NPC），为该分支内需要执行的指令PC。
     address_type m_pc;
     unsigned int m_calldepth;
+    //线程活跃掩码，代表了这条指令的活跃掩码。
     simt_mask_t m_active_mask;
+    //分支重聚点的PC（Reconvergence PC，RPC），是直接后必经结点的PC（IPDOM）。
     address_type m_recvg_pc;
+    //发生分支的时刻，时钟周期。
     unsigned long long m_branch_div_cycle;
+    //SIMT堆栈条目的类型。在<<通用图形处理器体系结构>>书中有拓展。
     stack_entry_type m_type;
     simt_stack_entry()
         : m_pc(-1),
@@ -516,7 +542,7 @@ class simt_stack {
           m_branch_div_cycle(0),
           m_type(STACK_ENTRY_TYPE_NORMAL){};
   };
-
+  //m_stack是SIMT堆栈的条目队列，成员是struct simt_stack_entry。
   std::deque<simt_stack_entry> m_stack;
 
   class gpgpu_sim *m_gpu;
@@ -1155,7 +1181,7 @@ class inst_t {
 
   address_type reconvergence_pc;  // -1 => not a branch, -2 => use function
                                   // return address
-  
+
   unsigned out[8];
   unsigned outcount;
   unsigned in[24];
