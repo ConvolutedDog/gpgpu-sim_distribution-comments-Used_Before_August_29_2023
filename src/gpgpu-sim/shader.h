@@ -415,10 +415,12 @@ enum concrete_scheduler {
 
 /*
 调度单元类。每个对象负责从其warp集中选择一条或多条指令，并发射这些指令进行执行。
+单个Shader Core里有可配置数量的调度器单元。
 */
 class scheduler_unit {  // this can be copied freely, so can be used in std
                         // containers.
  public:
+  //
   scheduler_unit(shader_core_stats *stats, shader_core_ctx *shader,
                  Scoreboard *scoreboard, simt_stack **simt,
                  std::vector<shd_warp_t *> *warp, register_set *sp_out,
