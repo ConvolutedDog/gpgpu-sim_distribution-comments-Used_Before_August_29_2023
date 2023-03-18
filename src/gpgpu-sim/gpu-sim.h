@@ -693,7 +693,7 @@ class gpgpu_sim : public gpgpu_t {
   unsigned long long gpu_tot_issued_cta;
   //已经完成的CTA的总数。
   unsigned gpu_completed_cta;
-
+  //上一次最后发射的集群。
   unsigned m_last_cluster_issue;
   float *average_pipeline_duty_cycle;
   //SIMT Core集群中的活跃SM的数量。
