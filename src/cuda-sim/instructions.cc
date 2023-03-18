@@ -2326,6 +2326,9 @@ void mapping(int thread, int wmma_type, int wmma_layout, int type, int index,
   //printf("#### thid: %d, row: %d, col: %d, offset: %d\n", thread, row, col, offset);
 }
 
+/*
+wmma的功能模拟。
+*/
 void mma_impl(const ptx_instruction *pI, core_t *core, warp_inst_t inst) {
   int i, j, k, thrd;
   int row, col, offset;
