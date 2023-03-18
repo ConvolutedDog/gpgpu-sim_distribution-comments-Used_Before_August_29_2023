@@ -1053,6 +1053,12 @@ void kernel_info_t::destroy_cta_streams() {
   m_cta_streams.clear();
 }
 
+/*
+SIMT 堆栈类的构造函数。每个SIMT Core中，都有可配置数量的调度器单元。对于每个调度器单元，有一个SIMT
+堆栈阵列。每个SIMT堆栈对应一个warp。传入的参数是：
+    unsigned wid：warp的ID；
+    unsigned warpSize：单个warp内的线程数量。
+*/
 simt_stack::simt_stack(unsigned wid, unsigned warpSize, class gpgpu_sim *gpu) {
   m_warp_id = wid;
   m_warp_size = warpSize;
@@ -1060,18 +1066,34 @@ simt_stack::simt_stack(unsigned wid, unsigned warpSize, class gpgpu_sim *gpu) {
   reset();
 }
 
+/*
+m_stack定义为：
+    std::deque<simt_stack_entry> m_stack;
+清空m_stack里的所有条目。
+*/
 void simt_stack::reset() { m_stack.clear(); }
 
+/*
+功能模拟过程中，用warp的起始PC值（用该warp的首个线程m_thread[warpId * m_warp_size]->get_pc()获
+取）线程和其线程掩码用于启动SIMT堆栈。
+*/
 void simt_stack::launch(address_type start_pc, const simt_mask_t &active_mask) {
+  //清空m_stack里的所有条目。
   reset();
+  //新建SIMT堆栈里的首个条目。
   simt_stack_entry new_stack_entry;
+  //设置PC值、线程掩码等信息。
   new_stack_entry.m_pc = start_pc;
   new_stack_entry.m_calldepth = 1;
   new_stack_entry.m_active_mask = active_mask;
   new_stack_entry.m_type = STACK_ENTRY_TYPE_NORMAL;
+  //把创建好的首个条目压入m_stack队列。
   m_stack.push_back(new_stack_entry);
 }
 
+/*
+暂时用不到，以后用到再补充。
+*/
 void simt_stack::resume(char *fname) {
   reset();
 
@@ -1110,22 +1132,34 @@ void simt_stack::resume(char *fname) {
   fclose(fp2);
 }
 
+/*
+返回m_stack队列最末尾加入条目的线程掩码。[最末尾加入条目]即为栈顶top。
+*/
 const simt_mask_t &simt_stack::get_active_mask() const {
   assert(m_stack.size() > 0);
   return m_stack.back().m_active_mask;
 }
 
+/*
+返回m_stack队列最末尾加入条目的PC值和RPC值。[最末尾加入条目]即为栈顶top。
+*/
 void simt_stack::get_pdom_stack_top_info(unsigned *pc, unsigned *rpc) const {
   assert(m_stack.size() > 0);
   *pc = m_stack.back().m_pc;
   *rpc = m_stack.back().m_recvg_pc;
 }
 
+/*
+返回m_stack队列最末尾加入条目的RPC值。[最末尾加入条目]即为栈顶top。
+*/
 unsigned simt_stack::get_rp() const {
   assert(m_stack.size() > 0);
   return m_stack.back().m_recvg_pc;
 }
 
+/*
+打印SIMT堆栈的每个条目。
+*/
 void simt_stack::print(FILE *fout) const {
   for (unsigned k = 0; k < m_stack.size(); k++) {
     simt_stack_entry stack_entry = m_stack[k];
@@ -1156,6 +1190,9 @@ void simt_stack::print(FILE *fout) const {
   }
 }
 
+/*
+打印SIMT堆栈的check point。
+*/
 void simt_stack::print_checkpoint(FILE *fout) const {
   for (unsigned k = 0; k < m_stack.size(); k++) {
     simt_stack_entry stack_entry = m_stack[k];
@@ -1169,17 +1206,23 @@ void simt_stack::print_checkpoint(FILE *fout) const {
   }
 }
 
+/*
+更新SIMT堆栈的状态。最好先将激活线程最多的条目放进栈，然后将激活线程较少的条目放入栈。
+*/
 void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
                         address_type recvg_pc, op_type next_inst_op,
                         unsigned next_inst_size, address_type next_inst_pc) {
   assert(m_stack.size() > 0);
 
   assert(next_pc.size() == m_warp_size);
-
+  //栈顶活跃线程掩码。
   simt_mask_t top_active_mask = m_stack.back().m_active_mask;
+  //栈顶聚合PC。
   address_type top_recvg_pc = m_stack.back().m_recvg_pc;
+  //栈顶PC。
   address_type top_pc =
       m_stack.back().m_pc;  // the pc of the instruction just executed
+  //栈顶堆栈条目的类型。
   stack_entry_type top_type = m_stack.back().m_type;
   assert(top_pc == next_inst_pc);
   assert(top_active_mask.any());
@@ -1188,37 +1231,52 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   bool warp_diverged = false;
   address_type new_recvg_pc = null_pc;
   unsigned num_divergent_paths = 0;
-
+  
+  //下面一个while循环是获取divergent_paths。divergent_paths是分支路径的映射，是从 address_type->
+  //simt_mask_t 映射的Map。
   std::map<address_type, simt_mask_t> divergent_paths;
+  //bitset::any()是C++ STL中的内置函数，如果数字中至少设置了一位，则返回True。如果未设置所有位或数
+  //字为零，则返回False。
   while (top_active_mask.any()) {
-    // extract a group of threads with the same next PC among the active threads
-    // in the warp
+    // extract a group of threads with the same next PC among the active threads in the warp.
+    //在warp中的所有活跃线程中提取具有相同的NPC(next PC)的一组线程。
     address_type tmp_next_pc = null_pc;
     simt_mask_t tmp_active_mask;
+    //对warp中的所有线程进行循环。
     for (int i = m_warp_size - 1; i >= 0; i--) {
+      //如果栈顶活跃线程掩码标识该线程是开启的。
       if (top_active_mask.test(i)) {  // is this thread active?
+        //thread_done也是线程掩码，如果某个线程已经被执行完毕，就对应位置1。
         if (thread_done.test(i)) {
+          //线程执行完毕，设置活跃线程掩码的对应位置零，这里是为了下次再更新SIMT堆栈时就不再进第i个
+          //线程while循环了。
           top_active_mask.reset(i);  // remove completed thread from active mask
         } else if (tmp_next_pc == null_pc) {
+          //当前线程尚未执行完毕，获取当前线程的NPC和设置活跃线程掩码对应位。
           tmp_next_pc = next_pc[i];
           tmp_active_mask.set(i);
+          //处理上述两句后，设置活跃线程掩码的对应位置零，这里是为了下次再更新SIMT堆栈时就不再进第
+          //i个线程while循环了。
           top_active_mask.reset(i);
         } else if (tmp_next_pc == next_pc[i]) {
           tmp_active_mask.set(i);
+          //处理上述两句后，设置活跃线程掩码的对应位置零，这里是为了下次再更新SIMT堆栈时就不再进第
+          //i个线程while循环了。
           top_active_mask.reset(i);
         }
       }
     }
-
+    //warp中所有的线程都循环一遍后，若tmp_next_pc==null_pc，则说明所有线程都已经结束。
     if (tmp_next_pc == null_pc) {
       assert(!top_active_mask.any());  // all threads done
       continue;
     }
-
+    //加入到分支路径中。
     divergent_paths[tmp_next_pc] = tmp_active_mask;
     num_divergent_paths++;
   }
 
+  //
   address_type not_taken_pc = next_inst_pc + next_inst_size;
   assert(num_divergent_paths <= 2);
   for (unsigned i = 0; i < num_divergent_paths; i++) {
