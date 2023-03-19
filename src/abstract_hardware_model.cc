@@ -1269,7 +1269,58 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   //          G                  F             0001
   //          G                  E             1110
   //
-
+  //按照下述循环：
+  // 1.第一次进while: top_active_mask=1110
+  //                 tmp_next_pc = null_pc
+  //                 tmp_active_mask = null
+  //                 i=4-1=3, top_active_mask.test(3)=false;
+  //                 i=4-2=2, top_active_mask.test(2)=true:
+  //                     if thread_done.test(2)=true:
+  //                         top_active_mask=1100
+  //                     elif (tmp_next_pc == null_pc)=true:
+  //                         tmp_next_pc = next_pc[2]
+  //                         tmp_active_mask = 0010
+  //                         top_active_mask = 1100
+  //                 i=4-3=1, top_active_mask.test(1)=true:
+  //                     if thread_done.test(1)=true:
+  //                         top_active_mask=1000
+  //                     elif (tmp_next_pc == next_pc[1])=true:
+  //                         //next_pc[1]=next_pc[2]
+  //                         tmp_active_mask = 0110
+  //                         top_active_mask = 1000
+  //                     elif (tmp_next_pc == next_pc[1])=false:
+  //                         //next_pc[1]!=next_pc[2]
+  //                         tmp_active_mask = 0010
+  //                         top_active_mask = 1100
+  //                 i=4-4=0, top_active_mask.test(0)=true:
+  //                     if thread_done.test(0)=true:
+  //                         top_active_mask=0000
+  //                     elif (tmp_next_pc == next_pc[0])=true: 
+  //                         //next_pc[0]=next_pc[1]=next_pc[2]
+  //                         tmp_active_mask = 1110
+  //                         top_active_mask = 0000
+  //                     elif (tmp_next_pc == next_pc[0])=false:
+  //                         //next_pc[0]!=next_pc[1]=next_pc[2]
+  //                         tmp_active_mask = 0110
+  //                         top_active_mask = 1000 //进第2次while循环
+  //                     elif (tmp_next_pc == next_pc[0])=true:
+  //                         //next_pc[0]=next_pc[2]!=next_pc[1]
+  //                         tmp_active_mask = 1110
+  //                         top_active_mask = 0000
+  //                     elif (tmp_next_pc == next_pc[0])=false:
+  //                         //next_pc[1]!=next_pc[0]!=next_pc[2]!=next_pc[1]
+  //                         tmp_active_mask = 0010
+  //                         top_active_mask = 1100 //进第2次while循环
+  //                 divergent_paths[tmp_next_pc] = tmp_active_mask;
+  //                 num_divergent_paths++;
+  //因此，第一次循环首先是判断第2号线程的NPC是否等于第1号线程的NPC，等于的话把top_active_mask(1)置
+  //零，说明第1号线程的分支路径与第1号线程的相同；不等于的话就不处理top_active_mask(1)，以便下次进
+  //入while循环，将第1号线程单独作为一个分支路径，再循环其余线程找与第1号线程分支路径相同的线程。而
+  //后再继续比较第0号线程的NPC是否与第2号线程的NPC相同，比较方法类似。比较过程中，与第2号线程的NPC
+  //相同的线程，在tmp_next_pc中做标记即置1。在第一次while循环末尾，将第2号线程的NPC作为key，并且将
+  //tmp_next_pc作为value保存到字典divergent_paths中，并将不同分支路径的计数值num_divergent_paths
+  //加1。之后进入第二次循环，生成第二个单独的分支路径。如此以往，等到while循环跳出时，就找到了所有的
+  //分支路径。
   std::map<address_type, simt_mask_t> divergent_paths;
   //bitset::any()是C++ STL中的内置函数，如果数字中至少设置了一位，则返回True。如果未设置所有位或数
   //字为零，则返回False。
