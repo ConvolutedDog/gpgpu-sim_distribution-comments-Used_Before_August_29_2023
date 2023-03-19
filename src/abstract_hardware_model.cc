@@ -1365,6 +1365,7 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
 
   //
   address_type not_taken_pc = next_inst_pc + next_inst_size;
+  //正常的分支路径不超过2，if...else if...else...的分支处理也是按照两个分支路径的嵌套进行。
   assert(num_divergent_paths <= 2);
   for (unsigned i = 0; i < num_divergent_paths; i++) {
     address_type tmp_next_pc = null_pc;
