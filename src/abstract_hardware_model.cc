@@ -1217,13 +1217,14 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   assert(next_pc.size() == m_warp_size);
   //栈顶活跃线程掩码。
   simt_mask_t top_active_mask = m_stack.back().m_active_mask;
-  //栈顶聚合PC。
+  //栈顶聚合RPC。
   address_type top_recvg_pc = m_stack.back().m_recvg_pc;
-  //栈顶PC。
+  //栈顶NPC。
   address_type top_pc =
       m_stack.back().m_pc;  // the pc of the instruction just executed
   //栈顶堆栈条目的类型。
   stack_entry_type top_type = m_stack.back().m_type;
+  //栈顶NPC === next_inst_pc。
   assert(top_pc == next_inst_pc);
   assert(top_active_mask.any());
 
@@ -1233,7 +1234,42 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   unsigned num_divergent_paths = 0;
   
   //下面一个while循环是获取divergent_paths。divergent_paths是分支路径的映射，是从 address_type->
-  //simt_mask_t 映射的Map。
+  //simt_mask_t 映射的Map。正常的分支路径不超过2，if...else if...else...的分支处理也是按照两个分支
+  //路径的嵌套进行。以下是一个实例：
+  //                  entry
+  //                   \|/
+  //          <———Yes—— A/1111 ——No———>
+  //    —————|—————                    |
+  //   |           |                   |
+  //   |           |                  \|/
+  // B/1110      D/0110              F/0001
+  //   |           |                   |
+  //   |           |                   |
+  //    ————\|/————                    |
+  //       E/1110                      |
+  //         |                         |
+  //        \|/————————————————————————
+  //       G/1111
+  //
+  //SIMT Stack Initial State:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  B             1110
+  //SIMT Stack After Divergent Branch:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  E             1110 (i)
+  //          E                  D             0110 (ii)
+  //          E                  C             1000 (iii)
+  //SIMT Stack After Reconvergence:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  E             1110
+  //
+
   std::map<address_type, simt_mask_t> divergent_paths;
   //bitset::any()是C++ STL中的内置函数，如果数字中至少设置了一位，则返回True。如果未设置所有位或数
   //字为零，则返回False。
