@@ -1239,13 +1239,13 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   //                  entry
   //                   \|/
   //          <———Yes—— A/1111 ——No———>
-  //    —————|—————                    |
-  //   |           |                   |
-  //   |           |                  \|/
-  // B/1110      D/0110              F/0001
-  //   |           |                   |
-  //   |           |                   |
-  //    ————\|/————                    |
+  //    ———B/1110———                   |
+  //   |            |                  |
+  //   |            |                 \|/
+  // C/1000       D/0110             F/0001
+  //   |            |                  |
+  //   |            |                  |
+  //    ————\|/—————                   |
   //       E/1110                      |
   //         |                         |
   //        \|/————————————————————————
@@ -1269,7 +1269,7 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
   //          G                  F             0001
   //          G                  E             1110
   //
-  //按照下述循环：
+  //当SIMT堆栈处于（SIMT Stack Initial State）状态时，按照下述循环：
   // 1.第一次进while: top_active_mask=1110
   //                 tmp_next_pc = null_pc
   //                 tmp_active_mask = null
@@ -1363,10 +1363,65 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
     num_divergent_paths++;
   }
 
-  //
+  //栈顶NPC === next_inst_pc，即top_pc == next_inst_pc。
   address_type not_taken_pc = next_inst_pc + next_inst_size;
   //正常的分支路径不超过2，if...else if...else...的分支处理也是按照两个分支路径的嵌套进行。
   assert(num_divergent_paths <= 2);
+  //依然选择上面的实例：
+  //                  entry
+  //                   \|/
+  //          <———Yes—— A/1111 ——No———>
+  //    ———B/1110———                   |
+  //   |            |                  |
+  //   |            |                 \|/
+  // C/1000       D/0110             F/0001
+  //   |            |                  |
+  //   |            |                  |
+  //    ————\|/—————                   |
+  //       E/1110                      |
+  //         |                         |
+  //        \|/————————————————————————
+  //       G/1111
+  //
+  //SIMT Stack Initial State:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  B             1110
+  //SIMT Stack After Divergent Branch:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  E             1110 (i)
+  //          E                  D             0110 (ii)
+  //          E                  C             1000 (iii)
+  //SIMT Stack After Reconvergence:
+  //    Ret./Reconv. PC       Next PC       Active Mask
+  //          -                  G             1111
+  //          G                  F             0001
+  //          G                  E             1110
+  //
+  //我们选择下面的一个状态（SIMT Stack After Reconvergence）来分析，此时的SIMT堆栈的状态为：
+  //    SIMT Stack Initial State:
+  //        Ret./Reconv. PC       Next PC       Active Mask
+  //              -                  G             1111
+  //              G                  F             0001
+  //              G                  B             1110
+  //根据上面寻找分支路径来说：
+  //    B开始分支出两个路径，num_divergent_paths = 2，两个路径分别是：
+  //        路径0：divergent_paths[C] = 1000
+  //        路径1：divergent_paths[D] = 0110
+  //not_taken_pc = next_pc(B)+1 = D
+  //对路径0：tmp_next_pc = null_pc
+  //        tmp_active_mask = 0000
+  //        D在divergent_paths中：
+  //            tmp_next_pc = not_taken_pc = next_pc(B)+1 = D
+  //            tmp_active_mask = divergent_paths[D] = 0110
+  //            del divergent_paths[D]
+  //        
+  //???
+  //???
+  //???
   for (unsigned i = 0; i < num_divergent_paths; i++) {
     address_type tmp_next_pc = null_pc;
     simt_mask_t tmp_active_mask;
@@ -1385,6 +1440,7 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
     }
 
     // HANDLE THE SPECIAL CASES FIRST
+    //首先处理特殊case，包括call、ret指令。
     if (next_inst_op == CALL_OPS) {
       // Since call is not a divergent instruction, all threads should have
       // executed a call instruction
