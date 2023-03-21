@@ -213,7 +213,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %type <ptr_value> function_decl
 
 %{
-  	#include "ptx_parser.h"
+	/*
+	# 2023.03.21 yangjianchao16 del
+	#include "ptx_parser.h"
+	*/
+  	#include "../cuobjdump_to_ptxplus/ptx_parser.h"
 	#include <stdlib.h>
 	#include <string.h>
 	#include <math.h>
