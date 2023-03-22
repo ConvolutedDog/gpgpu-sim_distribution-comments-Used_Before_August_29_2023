@@ -1213,11 +1213,12 @@ void simt_stack::update(simt_mask_t &thread_done, addr_vector_t &next_pc,
                         address_type recvg_pc, op_type next_inst_op,
                         unsigned next_inst_size, address_type next_inst_pc) {
   assert(m_stack.size() > 0);
-
+  //next_pc是一个地址向量，addr_vector_t定义为：
+  //    typedef std::vector<address_type> addr_vector_t;
   assert(next_pc.size() == m_warp_size);
   //栈顶活跃线程掩码。
   simt_mask_t top_active_mask = m_stack.back().m_active_mask;
-  //栈顶聚合RPC。
+  //栈顶RPC。
   address_type top_recvg_pc = m_stack.back().m_recvg_pc;
   //栈顶NPC。
   address_type top_pc =
@@ -1539,10 +1540,17 @@ bool core_t::ptx_thread_done(unsigned hw_thread_id) const {
           m_thread[hw_thread_id]->is_done());
 }
 
+/*
+更新SIMT堆栈的预先处理。
+*/
 void core_t::updateSIMTStack(unsigned warpId, warp_inst_t *inst) {
+  //thread_done也是线程掩码，如果某个线程已经被执行完毕，就对应位置1。
   simt_mask_t thread_done;
+  //next_pc是一个地址向量，addr_vector_t定义为：
+  //    typedef std::vector<address_type> addr_vector_t;
   addr_vector_t next_pc;
   unsigned wtid = warpId * m_warp_size;
+  //对warp内的所有线程循环。
   for (unsigned i = 0; i < m_warp_size; i++) {
     if (ptx_thread_done(wtid + i)) {
       thread_done.set(i);
@@ -1553,6 +1561,7 @@ void core_t::updateSIMTStack(unsigned warpId, warp_inst_t *inst) {
       next_pc.push_back(m_thread[wtid + i]->get_pc());
     }
   }
+  //更新SIMT堆栈的对象。
   m_simt_stack[warpId]->update(thread_done, next_pc, inst->reconvergence_pc,
                                inst->op, inst->isize, inst->pc);
 }
