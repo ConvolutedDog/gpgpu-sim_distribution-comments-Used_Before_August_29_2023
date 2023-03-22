@@ -1308,6 +1308,7 @@ Shader Core里的单个调度器单元向前推进一拍，执行scheduler_unit:
 */
 void scheduler_unit::cycle() {
   SCHED_DPRINTF("scheduler_unit::cycle()\n");
+  //有一个warp需要发出有效的指令（由于控制危险，不需要flush）。
   bool valid_inst =
       false;  // there was one warp with a valid instruction to issue (didn't
               // require flush due to control hazard)
@@ -1315,6 +1316,7 @@ void scheduler_unit::cycle() {
                              // waiting for pending register writes
   bool issued_inst = false;  // of these we issued one
 
+  //warp是根据某些策略重新排序的，这是不同调度器之间的主要区别。
   order_warps();
   for (std::vector<shd_warp_t *>::const_iterator iter =
            m_next_cycle_prioritized_warps.begin();
@@ -1394,7 +1396,8 @@ void scheduler_unit::cycle() {
             if ((pI->op == LOAD_OP) || (pI->op == STORE_OP) ||
                 (pI->op == MEMORY_BARRIER_OP) ||
                 (pI->op == TENSOR_CORE_LOAD_OP) ||
-                (pI->op == TENSOR_CORE_STORE_OP)) {
+                (pI->op == TENSOR_CORE_STORE_OP)) 
+            {
               if (m_mem_out->has_free(m_shader->m_config->sub_core_model,
                                       m_id) &&
                   (!diff_exec_units ||
@@ -1409,7 +1412,8 @@ void scheduler_unit::cycle() {
             } else {
               // This code need to be refactored
               if (pI->op != TENSOR_CORE_OP && pI->op != SFU_OP &&
-                  pI->op != DP_OP && !(pI->op >= SPEC_UNIT_START_ID)) {
+                  pI->op != DP_OP && !(pI->op >= SPEC_UNIT_START_ID)) 
+              {
                 bool execute_on_SP = false;
                 bool execute_on_INT = false;
 
@@ -1481,7 +1485,8 @@ void scheduler_unit::cycle() {
               } else if ((m_shader->m_config->gpgpu_num_dp_units > 0) &&
                          (pI->op == DP_OP) &&
                          !(diff_exec_units && previous_issued_inst_exec_type ==
-                                                  exec_unit_type_t::DP)) {
+                                                  exec_unit_type_t::DP)) 
+              {
                 bool dp_pipe_avail =
                     (m_shader->m_config->gpgpu_num_dp_units > 0) &&
                     m_dp_out->has_free(m_shader->m_config->sub_core_model,
@@ -1501,7 +1506,8 @@ void scheduler_unit::cycle() {
                          pI->op == DP_OP) ||
                         (pI->op == SFU_OP) || (pI->op == ALU_SFU_OP)) &&
                        !(diff_exec_units && previous_issued_inst_exec_type ==
-                                                exec_unit_type_t::SFU)) {
+                                                exec_unit_type_t::SFU)) 
+              {
                 bool sfu_pipe_avail =
                     (m_shader->m_config->gpgpu_num_sfu_units > 0) &&
                     m_sfu_out->has_free(m_shader->m_config->sub_core_model,
@@ -1517,7 +1523,8 @@ void scheduler_unit::cycle() {
                 }
               } else if ((pI->op == TENSOR_CORE_OP) &&
                          !(diff_exec_units && previous_issued_inst_exec_type ==
-                                                  exec_unit_type_t::TENSOR)) {
+                                                  exec_unit_type_t::TENSOR)) 
+              {
                 bool tensor_core_pipe_avail =
                     (m_shader->m_config->gpgpu_num_tensor_core_units > 0) &&
                     m_tensor_core_out->has_free(
