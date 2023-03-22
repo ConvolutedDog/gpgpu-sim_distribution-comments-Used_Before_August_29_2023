@@ -490,6 +490,7 @@ class scheduler_unit {  // this can be copied freely, so can be used in std
 
   // Derived classes can override this function to populate
   // m_supervised_warps with their scheduling policies
+  //派生类可以覆盖此函数，以使用其调度策略填充m_supervisored_warps。
   virtual void order_warps() = 0;
 
   int get_schd_id() const { return m_id; }
