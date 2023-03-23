@@ -420,7 +420,7 @@ enum concrete_scheduler {
 class scheduler_unit {  // this can be copied freely, so can be used in std
                         // containers.
  public:
-  //
+  //构造函数。
   scheduler_unit(shader_core_stats *stats, shader_core_ctx *shader,
                  Scoreboard *scoreboard, simt_stack **simt,
                  std::vector<shd_warp_t *> *warp, register_set *sp_out,
@@ -1793,6 +1793,9 @@ class shader_core_config : public core_config {
   unsigned m_specialized_unit_num;
 };
 
+/*
+
+*/
 struct shader_core_stats_pod {
   void *
       shader_core_stats_pod_start[0];  // DO NOT MOVE FROM THE TOP - spaceless
@@ -1896,6 +1899,9 @@ struct shader_core_stats_pod {
   long *n_mem_to_simt;
 };
 
+/*
+
+*/
 class shader_core_stats : public shader_core_stats_pod {
  public:
   shader_core_stats(const shader_core_config *config) {
