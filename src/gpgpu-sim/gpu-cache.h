@@ -43,11 +43,22 @@
 
 #define MAX_DEFAULT_CACHE_SIZE_MULTIBLIER 4
 
+/*
+cache block的状态，包含：
+HIT: 
+RESERVED: 为尚未完成的缓存未命中提供的数据提供空间
+*/
 enum cache_block_state { INVALID = 0, RESERVED, VALID, MODIFIED };
 
+/*
+对Cache请求的状态。
+*/
 enum cache_request_status {
+  //命中。
   HIT = 0,
+  //
   HIT_RESERVED,
+  //未命中。
   MISS,
   RESERVATION_FAIL,
   SECTOR_MISS,
@@ -1272,9 +1283,13 @@ class cache_stats {
   unsigned long long m_cache_fill_port_busy_cycles;
 };
 
+/*
+cache的基础类，虚拟函数。
+*/
 class cache_t {
  public:
   virtual ~cache_t() {}
+  //
   virtual enum cache_request_status access(new_addr_type addr, mem_fetch *mf,
                                            unsigned time,
                                            std::list<cache_event> &events) = 0;
@@ -1292,7 +1307,7 @@ bool was_writeallocate_sent(const std::list<cache_event> &events);
 Baseline cache.
 Implements common functions for read_only_cache and data_cache.
 Each subclass implements its own 'access' function.
-基础版缓存。实现read_only_cache和data_cache的通用功能。需要每个子类实现自己的“访问”功能。
+基础版Cache。实现read_only_cache和data_cache的通用功能。需要每个子类实现自己的“access”功能。
 */
 class baseline_cache : public cache_t {
  public:
@@ -1510,7 +1525,10 @@ class read_only_cache : public baseline_cache {
                        new_tag_array) {}
 };
 
-// Data cache - Implements common functions for L1 and L2 data cache
+/*
+数据Cache类。实现 L1 和 L2 数据Cache的常用函数。
+Data cache - Implements common functions for L1 and L2 data cache
+*/
 class data_cache : public baseline_cache {
  public:
   data_cache(const char *name, cache_config &config, int core_id, int type_id,
