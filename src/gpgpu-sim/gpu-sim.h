@@ -313,6 +313,11 @@ class memory_config {
     assert((nbk % m_n_sub_partition_per_memory_channel == 0) &&
            "Number of DRAM banks must be a perfect multiple of memory sub "
            "partition");
+    //gpgpu_n_mem为配置中的内存控制器（DRAM Channel）数量，定义为：
+    //  option_parser_register(
+    //      opp, "-gpgpu_n_mem", OPT_UINT32, &m_n_mem,
+    //      "number of memory modules (e.g. memory controllers) in gpu", "8");
+    //在V100配置中，有32个内存控制器（DRAM Channel）。
     m_n_mem_sub_partition = m_n_mem * m_n_sub_partition_per_memory_channel;
     fprintf(stdout, "Total number of memory sub partition = %u\n",
             m_n_mem_sub_partition);
