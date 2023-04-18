@@ -1197,7 +1197,8 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   m_total_cta_launched = 0;
   //GPU进入死锁状态的标志。
   gpu_deadlock = false;
-  //互连网络输出到DRAM Channel的暂停周期数。
+  //互连网络输出到DRAM Channel的暂停周期数。请求由icnt发送至L2_queue时，m_icnt_L2_queue没有SECTOR_
+  //CHUNCK_SIZE大小的空间可以保存请求信息，因此互连网络的拥塞造成DRAM的停滞次数。
   gpu_stall_dramfull = 0;
   //由于互连拥塞导致DRAM Channel停滞的周期数。
   gpu_stall_icnt2sh = 0;
@@ -1724,16 +1725,27 @@ void gpgpu_sim::gpu_print_stat() {
 
   std::string kernel_info_str = executed_kernel_info_string();
   fprintf(statfout, "%s", kernel_info_str.c_str());
-
+  //在当前kernel的模拟器模拟期间，模拟器运行的周期数。在运行PyTorch时有多个层的Kernel，或单个程序有可
+  //能编译出多个Kernel时，需要多次启动模拟器来执行多个Kernel，这时候在每次模拟器启动时，需要一个全局的
+  //记录周期数的变量来记录所有Kernel的执行周期数，因此就用gpu_tot_sim_cycle来表示这一全局的时钟周期数
+  //变量。即如果只有一个Kernel执行的话，仅启动一次模拟器，那么gpu_tot_sim_cycle初始化为0，运行过程中
+  //的当前的时钟周期数由gpu_sim_cycle记录。
   printf("gpu_sim_cycle = %lld\n", gpu_sim_cycle);
+  //在当前kernel的模拟器模拟期间，模拟器运行的指令数。在运行多个Kernel时，与gpu_tot_sim_cycle类似，
+  //由gpu_tot_sim_insn维护全局的执行指令总数变量。
   printf("gpu_sim_insn = %lld\n", gpu_sim_insn);
+  //在当前kernel的模拟器模拟期间，IPC。
   printf("gpu_ipc = %12.4f\n", (float)gpu_sim_insn / gpu_sim_cycle);
   printf("gpu_tot_sim_cycle = %lld\n", gpu_tot_sim_cycle + gpu_sim_cycle);
   printf("gpu_tot_sim_insn = %lld\n", gpu_tot_sim_insn + gpu_sim_insn);
+  //运行多个kernel的模拟期间，IPC。
   printf("gpu_tot_ipc = %12.4f\n", (float)(gpu_tot_sim_insn + gpu_sim_insn) /
                                        (gpu_tot_sim_cycle + gpu_sim_cycle));
+  //在当前kernel的模拟器模拟期间，m_total_cta_launched维护当前Kernel的CTA的发射数。在运行多个Kernel
+  //的时候，与gpu_tot_sim_cycle类似，gpu_tot_issued_cta维护多个Kernel执行期间的全局的CTA的发射总数。
   printf("gpu_tot_issued_cta = %lld\n",
          gpu_tot_issued_cta + m_total_cta_launched);
+  //
   printf("gpu_occupancy = %.4f%% \n", gpu_occupancy.get_occ_fraction() * 100);
   printf("gpu_tot_occupancy = %.4f%% \n",
          (gpu_occupancy + gpu_tot_occupancy).get_occ_fraction() * 100);
@@ -1742,12 +1754,19 @@ void gpgpu_sim::gpu_print_stat() {
           gpgpu_ctx->device_runtime->g_max_total_param_size);
 
   // performance counter for stalls due to congestion.
+  //由于拥塞而暂停的性能计数器。
+  
+  //互连网络输出到DRAM Channel的暂停周期数。请求由icnt发送至L2_queue时，m_icnt_L2_queue没有SECTOR_
+  //CHUNCK_SIZE大小的空间可以保存请求信息，因此互连网络的拥塞造成DRAM的停滞次数。
   printf("gpu_stall_dramfull = %d\n", gpu_stall_dramfull);
+  //
   printf("gpu_stall_icnt2sh    = %d\n", gpu_stall_icnt2sh);
 
   // printf("partiton_reqs_in_parallel = %lld\n", partiton_reqs_in_parallel);
   // printf("partiton_reqs_in_parallel_total    = %lld\n",
   // partiton_reqs_in_parallel_total );
+  
+  //
   printf("partiton_level_parallism = %12.4f\n",
          (float)partiton_reqs_in_parallel / gpu_sim_cycle);
   printf("partiton_level_parallism_total  = %12.4f\n",
@@ -2318,13 +2337,17 @@ void gpgpu_sim::cycle() {
       m_cluster[i]->icnt_cycle();
   }
   unsigned partiton_replys_in_parallel_per_cycle = 0;
+  
+  //更新ICNT时钟域，向前推进一拍。
   if (clock_mask & ICNT) {
     // pop from memory controller to interconnect
+    //从存储控制器向互连网络弹出。
     for (unsigned i = 0; i < m_memory_config->m_n_mem_sub_partition; i++) {
       mem_fetch *mf = m_memory_sub_partition[i]->top();
       if (mf) {
         unsigned response_size =
             mf->get_is_write() ? mf->get_ctrl_size() : mf->size();
+        //
         if (::icnt_has_buffer(m_shader_config->mem2device(i), response_size)) {
           // if (!mf->get_is_write())
           mf->set_return_timestamp(gpu_sim_cycle + gpu_tot_sim_cycle);
@@ -2373,6 +2396,15 @@ void gpgpu_sim::cycle() {
       // backed up) Note:This needs to be called in DRAM clock domain if there
       // is no L2 cache in the system In the worst case, we may need to push
       // SECTOR_CHUNCK_SIZE requests, so ensure you have enough buffer for them
+      //将内存请求从互连移动到内存分区（如果没有备份）注意：如果系统中没有二级缓存，则
+      //需要在DRAM时钟域中调用。在最坏的情况下，我们可能需要推送SECTOR_CHUNCK_SIZE大小
+      //的请求，因此确保您有足够的缓冲区来处理它们。
+      //m_memory_sub_partition[i]->full的定义为：
+      //    bool memory_sub_partition::full(unsigned size) const {
+      //      return m_icnt_L2_queue->is_avilable_size(size);
+      //    }
+      //即请求由icnt发送至L2_queue时，m_icnt_L2_queue没有SECTOR_CHUNCK_SIZE大小的空间
+      //可以保存请求信息，因此互连网络的拥塞造成DRAM的停滞。
       if (m_memory_sub_partition[i]->full(SECTOR_CHUNCK_SIZE)) {
         gpu_stall_dramfull++;
       } else {
