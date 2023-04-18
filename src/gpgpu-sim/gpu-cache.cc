@@ -412,6 +412,7 @@ void tag_array::fill(new_addr_type addr, unsigned time, mem_fetch *mf,
        is_write);
 }
 
+//
 void tag_array::fill(new_addr_type addr, unsigned time,
                      mem_access_sector_mask_t mask,
                      mem_access_byte_mask_t byte_mask, bool is_write) {
