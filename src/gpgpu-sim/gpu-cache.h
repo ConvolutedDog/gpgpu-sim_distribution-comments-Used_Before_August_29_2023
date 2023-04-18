@@ -125,12 +125,19 @@ struct cache_event {
 
 const char *cache_request_status_str(enum cache_request_status status);
 
+/*
+Cache block类。
+*/
 struct cache_block_t {
+  //构造函数。
   cache_block_t() {
+    //设置cache block的tag位为0。
+    //  Memory  |————————|——————————|————————|
+    //  Address    Tag       Set    Byte Offset
     m_tag = 0;
     m_block_addr = 0;
   }
-
+  
   virtual void allocate(new_addr_type tag, new_addr_type block_addr,
                         unsigned time,
                         mem_access_sector_mask_t sector_mask) = 0;
@@ -173,29 +180,41 @@ struct cache_block_t {
 };
 
 struct line_cache_block : public cache_block_t {
+  //构造函数。
   line_cache_block() {
     m_alloc_time = 0;
     m_fill_time = 0;
     m_last_access_time = 0;
+    //Cache line的状态，包括 INVALID = 0, RESERVED, VALID, MODIFIED。
     m_status = INVALID;
     m_ignore_on_fill_status = false;
     m_set_modified_on_fill = false;
     m_set_readable_on_fill = false;
     m_readable = true;
   }
+  //用于为特定的地址空间分配缓存块（cache block）。其参数如下：
+  // - tag：缓存块的标记（tag）
+  // - block_addr：缓存块的起始地址
+  // - time：当前时钟周期数
+  // - sector_mask：内存访问的扇区掩码
+  //该函数的作用是将指定的地址空间和对应缓存块相关联，并把该缓存块从缓存分区（cache set）中移除。同时
+  //会更新缓存统计信息和模拟器内部的时间计数器。
   void allocate(new_addr_type tag, new_addr_type block_addr, unsigned time,
                 mem_access_sector_mask_t sector_mask) {
     m_tag = tag;
     m_block_addr = block_addr;
     m_alloc_time = time;
+    //上次访问时间
     m_last_access_time = time;
     m_fill_time = 0;
+    //cache line的状态
     m_status = RESERVED;
     m_ignore_on_fill_status = false;
     m_set_modified_on_fill = false;
     m_set_readable_on_fill = false;
     m_set_byte_mask_on_fill = false;
   }
+  //
   virtual void fill(unsigned time, mem_access_sector_mask_t sector_mask,
                     mem_access_byte_mask_t byte_mask) {
     // if(!m_ignore_on_fill_status)
@@ -208,6 +227,7 @@ struct line_cache_block : public cache_block_t {
 
     m_fill_time = time;
   }
+  //返回Cache line的状态。
   virtual bool is_invalid_line() { return m_status == INVALID; }
   virtual bool is_valid_line() { return m_status == VALID; }
   virtual bool is_reserved_line() { return m_status == RESERVED; }
@@ -954,6 +974,11 @@ class l2_cache_config : public cache_config {
   linear_to_raw_address_translation *m_address_mapping;
 };
 
+/*
+常量缓存和数据缓存都包含一个成员tag_array对象，实现了保留和替换逻辑。probe()函数检查一个块地址而不影响相
+关数据的LRU位置，而access()是为了模拟一个影响LRU位置的查找，是产生未命中和访问统计的函数。纹理缓存没有使
+用tag_array，因为它的操作与传统的缓存有很大的不同。
+*/
 class tag_array {
  public:
   // Use this constructor
