@@ -1200,8 +1200,13 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   //互连网络输出到DRAM Channel的暂停周期数。请求由icnt发送至L2_queue时，m_icnt_L2_queue没有SECTOR_
   //CHUNCK_SIZE大小的空间可以保存请求信息，因此互连网络的拥塞造成DRAM的停滞次数。
   gpu_stall_dramfull = 0;
-  //由于互连拥塞导致DRAM Channel停滞的周期数。
+  //由于互连拥塞导致DRAM Channel停滞的周期数。在从存储控制器向互连网络弹出时，如果互连网络中有空闲
+  //的缓冲区，则将内存请求推入互连网络。但是一旦互联网络中的缓冲区被占满，就会停止推送。由于互连网
+  //络缓冲区的大小限制造成的停顿时钟周期数由gpu_stall_icnt2sh计数保存下来。
   gpu_stall_icnt2sh = 0;
+  //自模拟器启动的第一个时钟周期开始，partiton_reqs_in_parallel就根据每一拍的内存分区产生的请求开始
+  //计数。partiton_reqs_in_parallel表示自模拟器启动的第一个时钟周期开始后所有存储分区产生的请求被推
+  //入L2_queue的总个数。
   partiton_reqs_in_parallel = 0;
   partiton_reqs_in_parallel_total = 0;
   partiton_reqs_in_parallel_util = 0;
@@ -1433,6 +1438,7 @@ void gpgpu_sim::init() {
   m_total_cta_launched = 0;
   //已经完成的CTA的总数。
   gpu_completed_cta = 0;
+  //自模拟器启动的第一个时钟周期开始后所有存储分区产生的请求被推入L2_queue的总个数。
   partiton_reqs_in_parallel = 0;
   partiton_replys_in_parallel = 0;
   partiton_reqs_in_parallel_util = 0;
@@ -1759,16 +1765,23 @@ void gpgpu_sim::gpu_print_stat() {
   //互连网络输出到DRAM Channel的暂停周期数。请求由icnt发送至L2_queue时，m_icnt_L2_queue没有SECTOR_
   //CHUNCK_SIZE大小的空间可以保存请求信息，因此互连网络的拥塞造成DRAM的停滞次数。
   printf("gpu_stall_dramfull = %d\n", gpu_stall_dramfull);
-  //
+  //在从存储控制器向互连网络弹出时，如果互连网络中有空闲的缓冲区，则将内存请求推入互连网络。但是一旦
+  //互联网络中的缓冲区被占满，就会停止推送。由于互连网络缓冲区的大小限制造成的停顿时钟周期数由gpu_st
+  //all_icnt2sh计数保存下来。
   printf("gpu_stall_icnt2sh    = %d\n", gpu_stall_icnt2sh);
 
   // printf("partiton_reqs_in_parallel = %lld\n", partiton_reqs_in_parallel);
   // printf("partiton_reqs_in_parallel_total    = %lld\n",
   // partiton_reqs_in_parallel_total );
   
-  //
+  //自模拟器启动的第一个时钟周期开始，partiton_reqs_in_parallel就根据每一拍的内存分区产生的请求开始
+  //计数。partiton_reqs_in_parallel表示自模拟器启动的第一个时钟周期开始后所有存储分区产生的请求被推
+  //入L2_queue的总个数。这里partiton_level_parallism是指在当前Kernel执行期间平均每个时钟周期内存储
+  //分区产生的请求被推入L2_queue的个数。
   printf("partiton_level_parallism = %12.4f\n",
          (float)partiton_reqs_in_parallel / gpu_sim_cycle);
+  //partiton_reqs_in_parallel_total是指多个Kernel执行期间所有存储分区产生的请求被推入L2_queue的总个
+  //数，这个指标与gpu_tot_sim_cycle类似。
   printf("partiton_level_parallism_total  = %12.4f\n",
          (float)(partiton_reqs_in_parallel + partiton_reqs_in_parallel_total) /
              (gpu_tot_sim_cycle + gpu_sim_cycle));
@@ -2347,7 +2360,9 @@ void gpgpu_sim::cycle() {
       if (mf) {
         unsigned response_size =
             mf->get_is_write() ? mf->get_ctrl_size() : mf->size();
-        //
+        //在从存储控制器向互连网络弹出时，如果互连网络中有空闲的缓冲区，则将内存请求推入互连网络。
+        //但是一旦互联网络中的缓冲区被占满，就会停止推送。由于互连网络缓冲区的大小限制造成的停顿
+        //时钟周期数由gpu_stall_icnt2sh计数保存下来。
         if (::icnt_has_buffer(m_shader_config->mem2device(i), response_size)) {
           // if (!mf->get_is_write())
           mf->set_return_timestamp(gpu_sim_cycle + gpu_tot_sim_cycle);
@@ -2410,6 +2425,10 @@ void gpgpu_sim::cycle() {
       } else {
         mem_fetch *mf = (mem_fetch *)icnt_pop(m_shader_config->mem2device(i));
         m_memory_sub_partition[i]->push(mf, gpu_sim_cycle + gpu_tot_sim_cycle);
+        //如果mf不为空，则说明有请求被推入L2_queue，因此当前存储分区有请求产生，而且有
+        //partiton_reqs_in_parallel_per_cycle表示当前时钟周期内所有存储分区的并行请求
+        //产生的总个数，因此partiton_reqs_in_parallel_per_cycle++表示当前时钟周期内请
+        //求被推入L2_queue的总个数加1。
         if (mf) partiton_reqs_in_parallel_per_cycle++;
       }
       m_memory_sub_partition[i]->cache_cycle(gpu_sim_cycle + gpu_tot_sim_cycle);
@@ -2417,6 +2436,9 @@ void gpgpu_sim::cycle() {
           m_power_stats->pwr_mem_stat->l2_cache_stats[CURRENT_STAT_IDX]);
     }
   }
+  //自模拟器启动的第一个时钟周期开始，partiton_reqs_in_parallel就根据每一拍的内存分区产
+  //生的请求开始计数。partiton_reqs_in_parallel表示自模拟器启动的第一个时钟周期开始后所
+  //有存储分区产生的请求被推入L2_queue的总个数。
   partiton_reqs_in_parallel += partiton_reqs_in_parallel_per_cycle;
   if (partiton_reqs_in_parallel_per_cycle > 0) {
     partiton_reqs_in_parallel_util += partiton_reqs_in_parallel_per_cycle;
