@@ -4774,7 +4774,8 @@ void simt_core_cluster::icnt_cycle() {
   }
   //m_config->n_simt_ejection_buffer_size是弹出缓冲区中的数据包数。如果响应FIFO大小 < 弹出缓冲区中
   //的数据包数，则弹出缓冲区可以继续向SIMT Core集群的响应FIFO里弹出下一个数据包。弹出缓冲区指的是，[互
-  //连网络->弹出缓冲区->SIMT Core集群]的中间节点。
+  //连网络->弹出缓冲区->SIMT Core集群]的中间节点。这里m_response_fifo.size()是指m_response_fifo中的数
+  //据包数量，当m_response_fifo为空时，size=0。
   if (m_response_fifo.size() < m_config->n_simt_ejection_buffer_size) {
     //这里mem_fetch *mf指的是弹出缓冲区继续向SIMT Core集群的响应FIFO里弹出的下一个数据包。
     mem_fetch *mf = (mem_fetch *)::icnt_pop(m_cluster_id);
