@@ -1120,6 +1120,9 @@ void shader_core_ctx::fetch() {
   m_L1I->cycle();
 }
 
+/*
+指令的功能执行。
+*/
 void exec_shader_core_ctx::func_exec_inst(warp_inst_t &inst) {
   execute_warp_inst_t(inst);
   if (inst.is_load() || inst.is_store()) {
@@ -4644,6 +4647,9 @@ bool simt_core_cluster::icnt_injection_buffer_full(unsigned size, bool write) {
   return !::icnt_has_buffer(m_cluster_id, request_size);
 }
 
+/*
+SIMT Core将Packets注入互连网络的接口。
+*/
 void simt_core_cluster::icnt_inject_request_packet(class mem_fetch *mf) {
   // stats
   if (mf->get_is_write())
