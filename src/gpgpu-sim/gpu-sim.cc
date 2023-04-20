@@ -2346,7 +2346,12 @@ void gpgpu_sim::cycle() {
     //遵循核心时钟。
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
       //simt_core_cluster::icnt_cycle()方法将内存请求从互连网络推入simt核心集群的响应FIFO。它还从
-      //FIFO弹出请求，并将它们发送到相应内核的指令缓存或LDST单元。
+      //FIFO弹出请求，并将它们发送到相应内核的指令缓存或LDST单元。每个SIMT Core集群都有一个响应FIFO，
+      //用于保存从互连网络发出的数据包。数据包被定向到SIMT Core的指令缓存（如果它是为指令获取未命中
+      //提供服务的内存响应）或其内存流水线（memory pipeline，LDST 单元）。数据包以先进先出方式拿出。
+      //如果SIMT Core无法接受FIFO头部的数据包，则响应FIFO将停止。为了在LDST单元上生成内存请求，每个
+      //SIMT Core都有自己的注入端口接入互连网络。但是，注入端口缓冲区由SIMT Core集群所有SIMT Core共
+      //享。
       m_cluster[i]->icnt_cycle();
   }
   unsigned partiton_replys_in_parallel_per_cycle = 0;
