@@ -1129,10 +1129,12 @@ class inst_t {
   virtual void print_insn(FILE *fp) const {
     fprintf(fp, " [inst @ pc=0x%04x] ", pc);
   }
+  //指令的操作码是 LOAD 或 TENSOR_CORE_LOAD 则为load指令。
   bool is_load() const {
     return (op == LOAD_OP || op == TENSOR_CORE_LOAD_OP ||
             memory_op == memory_load);
   }
+  //指令的操作码是 STORE 或 TENSOR_CORE_STORE 则为store指令。
   bool is_store() const {
     return (op == STORE_OP || op == TENSOR_CORE_STORE_OP ||
             memory_op == memory_store);
@@ -1201,6 +1203,7 @@ class inst_t {
   unsigned initiation_interval;
 
   unsigned data_size;  // what is the size of the word being operated on?
+  //这里是每条指令都对应有自己的一个存储空间，需要在指令解码时设置。
   memory_space_t space;
   cache_operator_type cache_op;
 
@@ -1380,7 +1383,8 @@ class warp_inst_t : public inst_t {
     assert(m_per_scalar_thread_valid);
     return m_per_scalar_thread[n].memreqaddr[0];
   }
-
+  //m_isatomic变量是一个布尔值，用于指示指令是否为原子操作（atomic operation）。原子操作是一种特殊的指令，
+  //它可以保证在同一时间只有一个线程执行该指令，从而避免多个线程之间的竞争。
   bool isatomic() const { return m_isatomic; }
 
   unsigned warp_size() const { return m_config->warp_size; }
@@ -1439,6 +1443,7 @@ class warp_inst_t : public inst_t {
   //m_per_scalar_thread是线程信息的向量，每个warp有一个m_per_scalar_thread。
   std::vector<per_thread_info> m_per_scalar_thread;
   bool m_mem_accesses_created;
+  //当前指令的访存操作的列表。
   std::list<mem_access_t> m_accessq;
 
   unsigned m_scheduler_id;  // the scheduler that issues this inst
