@@ -63,10 +63,15 @@ const char *cache_fail_status_str(enum cache_reservation_fail_reason status) {
   return static_cache_reservation_fail_reason_str[status];
 }
 
+/*
+
+*/
 unsigned l1d_cache_config::set_bank(new_addr_type addr) const {
   // For sector cache, we select one sector per bank (sector interleaving)
   // This is what was found in Volta (one sector per bank, sector interleaving)
   // otherwise, line interleaving
+  //对于扇区缓存，我们为每个存储体选择一个扇区（扇区交错）。
+  //这是在Volta中发现的（每个存储体一个扇区，扇区交错），否则，行交错。
   return cache_config::hash_function(addr, l1_banks,
                                      l1_banks_byte_interleaving_log2,
                                      l1_banks_log2, l1_banks_hashing_function);
