@@ -83,9 +83,10 @@
                 ],
                 "settings": {
                     "foreground": "#1885c4", //设置颜色
-                    "fontStyle": "bold", //加粗
+                    "fontStyle": "", 
                     /*
                     "fontStyle": "italic", //斜体 
+                    "fontStyle": "bold", //加粗
                     "fontStyle": "italic underline", //斜体下划线 
                     "fontStyle": "italic bold underline", //斜体粗体下划线
                     */
