@@ -290,7 +290,8 @@ void warp_inst_t::broadcast_barrier_reduction(
 生成warp指令的内存访问请求。
 */
 void warp_inst_t::generate_mem_accesses() {
-  //如果 warp_inst_t 内的指令为空，或者指令非空但操作码为存储屏障，或者访存操作已经生成，则中断执行/跳回。
+  //如果 warp_inst_t 内的指令为空，或者指令非空但操作码为存储屏障，或者该指令的访存操作已经生成，则中断
+  //执行/跳回。
   if (empty() || op == MEMORY_BARRIER_OP || m_mem_accesses_created) return;
   //访存操作仅存在于 LOAD_OP、TENSOR_CORE_LOAD_OP、STORE_OP、TENSOR_CORE_STORE_OP，非这些指令都中断。
   if (!((op == LOAD_OP) || (op == TENSOR_CORE_LOAD_OP) || (op == STORE_OP) ||
@@ -299,7 +300,7 @@ void warp_inst_t::generate_mem_accesses() {
   //m_warp_active_mask是一个std::bitset对象，其计数为零，说明没有一个线程是活跃的。可能是PTX指令的谓词
   //将一整个warp的线程全部不需要执行这条指令了。
   if (m_warp_active_mask.count() == 0) return;  // predicated off
-  //m_accessq在abstract_hardware_model.h中定义：
+  //m_accessq 在abstract_hardware_model.h中定义：
   //    std::list<mem_access_t> m_accessq;
   //是一个[访存操作]的列表。starting_queue_size用于记录在生成访存操作之前，m_accessq在该起始状态下的大小。
   const size_t starting_queue_size = m_accessq.size();
@@ -309,7 +310,13 @@ void warp_inst_t::generate_mem_accesses() {
   //if((space.get_type() != tex_space) && (space.get_type() != const_space))
     assert(m_per_scalar_thread_valid);  // need address information per thread
 
-  //访存为写操作。
+  //下面分别根据access_type（访存类型）生成对应的访存行为，特别是param memory的访存实现是定义在了其他函数
+  //中：
+  //    memory_coalescing_arch[_atomic](is_write, access_type);
+  //因此，为了方便，这里把 is_write 和 access_type 作为参数传递给 memory_coalescing_arch[_atomic]，即需
+  //要提前获取以下。
+
+  //访存为写操作标志。
   bool is_write = is_store();
   //access_type：访存类型。
   //mem_access_type定义了在时序模拟器中对不同类型的存储器进行不同的访存类型：
@@ -405,19 +412,19 @@ void warp_inst_t::generate_mem_accesses() {
     {
       //m_config->mem_warp_parts：是共享存储冲突检查将warp划分为的部分数（Number of portions a warp 
       //is divided into for shared memory bank conflict check）。subwarp_size是单个部分的线程数量。
+      //在V100配置下，m_config->mem_warp_parts=1。
       unsigned subwarp_size = m_config->warp_size / m_config->mem_warp_parts;
       //总的最大bank访问数。
       unsigned total_accesses = 0;
       //对一个warp划分为的所有部分遍历。
-      for (unsigned subwarp = 0; subwarp < m_config->mem_warp_parts;
-           subwarp++) {
+      for (unsigned subwarp = 0; subwarp < m_config->mem_warp_parts; subwarp++) {
         // data structures used per part warp
         //每个warp part使用的数据结构：映射关系为 bank -> word address -> access count。
         std::map<unsigned, std::map<new_addr_type, unsigned> >
             bank_accs;  // bank -> word address -> access count
 
         // step 1: compute accesses to words in banks
-        //步骤1：计算对bank中字大小数据的访问。
+        //步骤1：计算对bank中字大小数据的访问量。
         //对当前subwarp中的所有线程遍历。
         for (unsigned thread = subwarp * subwarp_size;
              thread < (subwarp + 1) * subwarp_size; thread++) {
@@ -433,14 +440,14 @@ void warp_inst_t::generate_mem_accesses() {
           //返回地址 address 所在的那个字的首个字节数据的地址。
           new_addr_type word =
               line_size_based_tag_func(addr, m_config->WORD_SIZE);
-          //对 bank 个Bank的，以word为起始地址的数据访存。该地址的bank_accs增加1。
+          //对第 bank 个Bank，以word为起始地址的数据访存。该地址的bank_accs增加1。
           //bank_accs是一个三维的map，index1是bank号，index1指向的是std::map<new_addr_type, unsigned>
           //的value。该value的index是new_addr_type的地址，实际保存的是 address 所在的那个字的首个字节数
           //据的地址，然后这个地址指向的value是[访存的次数]。
           bank_accs[bank][word]++;
         }
         // Limit shared memory to do one broadcast per cycle (default on).
-        //将共享内存限制为每个周期执行一次广播（默认设置为打开）。
+        //将共享内存限制为每个周期执行一次广播（默认设置为打开）。但是在V100配置下，该值为false。
         if (m_config->shmem_limited_broadcast) {
           // step 2: look for and select a broadcast bank/word if one occurs
           //步骤2：查找并选择广播Bank/Word，即查找bank_accs[bank][word]中有广播的两层索引。有广播即为：
@@ -523,7 +530,7 @@ void warp_inst_t::generate_mem_accesses() {
           //不将共享内存限制为每个周期执行一次广播。
           // step 2: look for the bank with the maximum number of access to
           // different words
-          //步骤2：查找访问不同 word字 最多的Bank。
+          //步骤2：查找访问不同 word 字最多的Bank。
           unsigned max_bank_accesses = 0;
           std::map<unsigned, std::map<new_addr_type, unsigned> >::iterator b;
           for (b = bank_accs.begin(); b != bank_accs.end(); b++) {
@@ -538,7 +545,10 @@ void warp_inst_t::generate_mem_accesses() {
       }
       assert(total_accesses > 0 && total_accesses <= m_config->warp_size);
       //共享内存的访存时间消耗模型，建模为每次访存的最大的访存数（每次访存一个周期），因此上面计算了最大Bank访
-      //问数（max_bank_accesses）。
+      //问数（max_bank_accesses）。前面求 max_bank_accesses 时，是求每个Bank里的对第0号、第1号、... Bank访存
+      //次数的最大值，因此这里的 total_accesses 就是所有Bank里的对第0号、第1号、... Bank访存次数的最大值。
+      //由于当前指令是一个load或者store指令，因此它的访存时间消耗为访问bank的最大次数total_accesses。这里是传
+      //给性能模型的访存时间消耗时钟周期数。
       cycles = total_accesses;  // shared memory conflicts modeled as larger
                                 // initiation interval
       m_config->gpgpu_ctx->stats->ptx_file_line_stats_add_smem_bank_conflict(
@@ -574,6 +584,7 @@ void warp_inst_t::generate_mem_accesses() {
       abort();
   }
 
+  //仅有对tex_space、const_space、param_space_kernel才会执行到这里。
   if (cache_block_size) {
     assert(m_accessq.empty());
     mem_access_byte_mask_t byte_mask;
