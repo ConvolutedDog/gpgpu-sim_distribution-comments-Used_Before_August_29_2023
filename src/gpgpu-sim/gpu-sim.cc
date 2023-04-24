@@ -2497,7 +2497,7 @@ void gpgpu_sim::cycle() {
     if (g_interactive_debugger_enabled) gpgpu_debug();
 
       // McPAT main cycle (interface with McPAT)
-#ifdef GPGPUSIM_POWER_MODEL
+    #ifdef GPGPUSIM_POWER_MODEL
     if (m_config.g_power_simulation_enabled) {
       if(m_config.g_power_simulation_mode == 0){
       mcpat_cycle(m_config, getShaderCoreConfig(), m_gpgpusim_wrapper,
@@ -2506,7 +2506,7 @@ void gpgpu_sim::cycle() {
                   gpu_sim_insn, m_config.g_dvfs_enabled);
       }
     }
-#endif
+    #endif
 
     issue_block2core();
     decrement_kernel_latency();
@@ -2606,10 +2606,10 @@ void gpgpu_sim::cycle() {
     try_snap_shot(gpu_sim_cycle);
     spill_log_to_file(stdout, 0, gpu_sim_cycle);
 
-#if (CUDART_VERSION >= 5000)
+    #if (CUDART_VERSION >= 5000)
     // launch device kernel
     gpgpu_ctx->device_runtime->launch_one_device_kernel();
-#endif
+    #endif
   }
 }
 
