@@ -109,6 +109,10 @@ typedef unsigned long long addr_t;
 #define SPECIALIZED_UNIT_NUM 8
 #define SPEC_UNIT_START_ID 100
 
+/*
+Type of operation.
+操作类型。
+*/
 enum uarch_op_t {
   NO_OP = -1,
   ALU_OP = 1,
