@@ -2359,11 +2359,14 @@ simd_function_unit::simd_function_unit(const shader_core_config *config) {
 issue(warp_inst_t*&)成员函数将给定的流水线寄存器的内容移入m_dispatch_reg。
 */
 void simd_function_unit::issue(register_set &source_reg) {
-  //在simd_function_unit实现中，is_issue_partitioned()是虚拟函数。m_config->sub_core_model为True。
+  //在simd_function_unit实现中，is_issue_partitioned()是虚拟函数，除LDST单元外的其他计算单元均返回True。
+  //m_config->sub_core_model为True。
   bool partition_issue =
       m_config->sub_core_model && this->is_issue_partitioned();
+  //source_reg即为流水线寄存器，目的是找到一个非空的指令，将其移入m_dispatch_reg。
   source_reg.move_out_to(partition_issue, this->get_issue_reg_id(),
                          m_dispatch_reg);
+  //设置m_dispatch_reg的标识占用位图的状态，m_dispatch_reg是warp_inst_t类型，可获取该指令的延迟。
   occupied.set(m_dispatch_reg->latency);
 }
 
@@ -2402,6 +2405,10 @@ void tensor_core::issue(register_set &source_reg) {
   pipelined_simd_unit::issue(source_reg);
 }
 
+/*
+lane的意思为一个warp中有32个线程，而在流水线寄存器中可能暂存了很多条指令，这些指令的每对应的线程掩码的每一
+位都是一个lane。即遍历流水线寄存器中的非空指令，返回所有指令的整体线程掩码（所有指令线程掩码的或值）。
+*/
 unsigned pipelined_simd_unit::get_active_lanes_in_pipeline() {
   active_mask_t active_lanes;
   active_lanes.reset();
