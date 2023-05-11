@@ -2342,12 +2342,24 @@ void ldst_unit::invalidate() {
   m_L1D->invalidate();
 }
 
+/*
+issue(warp_inst_t*&)成员函数将给定的流水线寄存器的内容移入m_dispatch_reg。然后指令在m_dispatch_reg等待
+initiation_interval个周期。在此期间，没有其他的指令可以发到这个单元，所以这个等待是指令的吞吐量的模型。
+*/
 simd_function_unit::simd_function_unit(const shader_core_config *config) {
   m_config = config;
+  //m_dispatch_reg其实是个缓冲，保存输入的指令，等待执行。当指令从设置到功能单元的OC_EX寄存器发出时，它被
+  //保存在调度寄存器中。dispatch register是其中一种类型的寄存器。dispatch register记录着指令，会在被后续
+  //执行时被传递给执行单元。具体来说，dispatch register是一个包含多个字段的结构体，其中包括指令的目的地址、
+  //数据类型、操作码等信息。dispatch register可以看作是指令调度过程中传递数据的重要寄存器。
   m_dispatch_reg = new warp_inst_t(config);
 }
 
+/*
+issue(warp_inst_t*&)成员函数将给定的流水线寄存器的内容移入m_dispatch_reg。
+*/
 void simd_function_unit::issue(register_set &source_reg) {
+  //在simd_function_unit实现中，is_issue_partitioned()是虚拟函数。m_config->sub_core_model为True。
   bool partition_issue =
       m_config->sub_core_model && this->is_issue_partitioned();
   source_reg.move_out_to(partition_issue, this->get_issue_reg_id(),
