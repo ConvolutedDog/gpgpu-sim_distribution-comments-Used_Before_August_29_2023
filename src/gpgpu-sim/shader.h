@@ -1215,7 +1215,25 @@ class simd_function_unit {
 };
 
 /*
+SP单元和SFU单元的时序模型主要在 shader.h 中定义的 pipelined_simd_unit 类中实现。模拟单元的具体类（
+sp_unit类和sfu类）是从这个类派生出来的，由可重载的 can_issue() 成员函数来指定单元可执行的指令类型。
 
+SP单元通过OC_EX_SP流水线寄存器连接到操作收集器单元；SFU单元通过OC_EX_SFU流水线寄存器连接到操作数收集
+器单元。两个单元通过WB_EX流水线寄存器共享一个共同的写回阶段。为了防止两个单元因写回阶段的冲突而停滞，
+每条进入任何一个单元的指令都必须在发出到目标单元之前在结果总线（m_result_bus）上分配一个槽（见shader
+_core_ctx::execute()）。
+
+手册[ALU流水线软件模型]中的图提供了一个概览，介绍了pipelined_simd_unit如何为不同类型的指令建立吞吐量
+和延迟。
+
+在每个pipelined_simd_unit中，issue(warp_inst_t*&)成员函数将给定的流水线寄存器的内容移入m_dispatch_
+reg。然后指令在m_dispatch_reg等待initiation_interval个周期。在此期间，没有其他的指令可以发到这个单
+元，所以这个等待是指令的吞吐量的模型。等待之后，指令被派发到内部流水线寄存器m_pipeline_reg进行延迟建
+模。派遣的位置是确定的，所以在m_dispatch_reg中花费的时间也被计入延迟中。每个周期，指令将通过流水线寄
+存器前进，最终进入m_result_port，这是共享的流水线寄存器，通向SP和SFU单元的共同写回阶段。
+
+各类指令的吞吐量和延迟在cuda-sim.cc的ptx_instruction::set_opcode_and_latency()中指定。这个函数在预
+解码时被调用。
 */
 class pipelined_simd_unit : public simd_function_unit {
  public:
