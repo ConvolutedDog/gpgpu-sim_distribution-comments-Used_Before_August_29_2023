@@ -412,6 +412,7 @@ class kernel_info_t {
 
   mutable bool cache_config_set;
 
+  //用于模拟kernel&block的启动延迟时间，这包括kernel的启动延迟，每个线程块的启动延迟。
   unsigned m_kernel_TB_latency;  // this used for any CPU-GPU kernel latency and
                                  // counted in the gpu_cycle
 };
