@@ -2492,6 +2492,8 @@ void gpgpu_sim::cycle() {
         ((gpu_sim_cycle + gpu_tot_sim_cycle) >= g_single_step)) {
       raise(SIGTRAP);  // Debug breakpoint
     }
+    //需要注意，gpu_sim_cycle仅在CORE时钟域向前推进一拍时才更新，因此gpu_sim_cycle表示CORE时钟
+    //域的当前执行拍数。
     gpu_sim_cycle++;
 
     if (g_interactive_debugger_enabled) gpgpu_debug();
