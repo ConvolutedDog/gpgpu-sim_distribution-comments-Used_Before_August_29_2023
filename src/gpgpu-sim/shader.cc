@@ -1197,6 +1197,128 @@ Dispatch position =              |---------|
 Latency - Issue_interval             |
                                     \|/
                                 m_result_port --> 写回
+/////////////////////////////////////////////////////////////////////////////////////////
+# GPGPU-Sim时钟推进
+
+## 四个时钟域的选择
+
+每个时钟域维护各自的当前执行周期数，这里不同时钟域的单个执行周期数由各自时钟域的频率决定：
+```c++
+l2_time, icnt_time, dram_time, core_time
+```
+GPGPU-Sim每拍向前推进一个时钟周期时，会选择一个或几个当前执行周期数最小的时钟域进行推进，同时将该时
+钟域维护的当前执行周期数增加一拍，这个选择是由函数`gpgpu_sim::next_clock_domain(void)`完成的。
+例如，当前四个时钟域的执行周期分别为：
+```c++
+l2_time=35拍, icnt_time=40拍, dram_time=50拍, core_time=30拍
+```
+那么会选择`CORE`时钟域进行更新，同时将`core_time`增加一拍，变为31拍，其他时钟域的执行周期数不变。
+
+## 时钟域的更新
+在选择`CORE`时钟域进行更新后，会循环所有SIMT Core集群都推进一个时钟周期：
+```c++
+if (clock_mask & CORE) {
+    //shader core loading (pop from ICNT into core) follows CORE clock.
+    //对所有的SIMT Core集群循环，m_cluster[i]是其中一个集群。Shader Core加载（从ICNT弹出到Core）
+    //遵循Core时钟。
+    for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
+      //simt_core_cluster::icnt_cycle()方法将内存请求从互连网络推入SIMT核心集群的响应FIFO。它还从
+      //FIFO弹出请求，并将它们发送到相应内核的指令缓存或LDST单元。每个SIMT Core集群都有一个响应FIFO，
+      //用于保存从互连网络发出的数据包。数据包被定向到SIMT Core的指令缓存（如果它是为指令获取未命中
+      //提供服务的内存响应）或其内存流水线（memory pipeline，LDST 单元）。数据包以先进先出方式拿出。
+      //如果SIMT Core无法接受FIFO头部的数据包，则响应FIFO将停止。为了在LDST单元上生成内存请求，每个
+      //SIMT Core都有自己的注入端口接入互连网络。但是，注入端口缓冲区由SIMT Core集群所有SIMT Core共
+      //享。
+      m_cluster[i]->icnt_cycle();
+}
+......
+if (clock_mask & CORE) {
+    //对GPU中所有的SIMT Core集群进行循环，更新每个集群的状态。
+    for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
+      //如果get_not_completed()大于1，代表这个SIMT Core尚未完成；如果get_more_cta_left()为1，
+      //代表这个SIMT Core还有剩余的CTA需要取执行。m_cluster[i]->get_not_completed()返回第i个
+      //SIMT Core集群中尚未完成的线程个数。
+      if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
+        //当调用simt_core_cluster::core_cycle()时，它会调用其中所有SM内核的循环。
+        m_cluster[i]->core_cycle();
+        //增加活跃的SM数量。get_n_active_sms()返回SIMT Core集群中的活跃SM的数量。active_sms是
+        //SIMT Core集群中的活跃SM的数量。
+        *active_sms += m_cluster[i]->get_n_active_sms();
+      }
+    //需要注意，gpu_sim_cycle仅在CORE时钟域向前推进一拍时才更新，因此gpu_sim_cycle表示CORE时钟
+    //域的当前执行拍数。
+    gpu_sim_cycle++;
+    //对所有SIMT Core集群遍历，选择每个集群内的一个SIMT Core，并向其发射一个线程块。在选择发射哪
+    //个kernel时，会调用gpgpu_sim::select_kernel()方法。该方法会判断当前是否还有未完成的kernel，
+    //并判断是否该kernel已经把所有启动时间减为0。如果有未完成的kernel，且该kernel已经把所有启动
+    //时间减为0，则会选择该kernel的以执行。
+    issue_block2core();
+    //m_kernel_TB_latency用于模拟kernel&block的启动延迟时间，这包括kernel的启动延迟，每个线程块
+    //的启动延迟。每次调用decrement_kernel_latency()时，都会将m_kernel_TB_latency减1，直到减为
+    //0，才说明kernel可以被选择以执行。
+    decrement_kernel_latency();
+}
+```
+
+## 单个SIMT Core集群以及单个SIMT Core的更新
+单个SIMT Core集群向前推进一个时钟周期，调用`simt_core_cluster::core_cycle()`方法：
+```c++
+void simt_core_cluster::core_cycle() {
+  //对SIMT Core集群中的每一个单独的SIMT Core循环。
+  for (std::list<unsigned>::iterator it = m_core_sim_order.begin();
+       it != m_core_sim_order.end(); ++it) {
+    //SIMT Core集群中的每一个单独的SIMT Core都向前推进一个时钟周期。
+    m_core[*it]->cycle();
+  }
+}
+```
+单个SIMT Core向前推进一个时钟周期，调用`shader_core_ctx::cycle()`方法：
+```c++
+  //如果这个SIMT Core处于非活跃状态，且已经执行完成，时钟周期不向前推进。
+  if (!isactive() && get_not_completed() == 0) return;
+
+  //每个内核时钟周期，shader_core_ctx::cycle()都被调用，以模拟SIMT Core的一个周期。这个函数调用一
+  //组成员函数，按相反的顺序模拟内核的流水线阶段，以模拟流水线效应：
+  //     fetch()             倒数第一执行
+  //     decode()            倒数第二执行
+  //     issue()             倒数第三执行
+  //     read_operand()      倒数第四执行
+  //     execute()           倒数第五执行
+  //     writeback()         倒数第六执行
+  writeback();
+  execute();
+  read_operands();
+  issue();
+  for (int i = 0; i < m_config->inst_fetch_throughput; ++i) {
+    decode();
+    fetch();
+  }
+```
+
+## 单条指令的吞吐和延迟
+在每个pipelined_simd_unit中，issue(warp_inst_t*&)成员函数将给定的流水线寄存器的内容移入m_dispat
+ch_reg。然后指令在m_dispatch_reg等待initiation_interval个周期。在此期间，没有其他的指令可以发到这
+个单元，所以这个等待是指令的吞吐量的模型。等待之后，指令被派发到内部流水线寄存器m_pipeline_reg进行延
+迟建模。派遣的位置是确定的，所以在m_dispatch_reg中花费的时间也被计入延迟中。每个周期，指令将通过流水
+线寄存器前进，最终进入m_result_port，这是共享的流水线寄存器，通向SP和SFU单元的共同写回阶段。示意图：
+```c++
+              m_dispatch_reg    m_pipeline_reg      
+                  / |            |---------|
+                 /  |----------> |         | 31  --|
+                /   |            |---------|       |
+Dispatch done every |----------> |         | :     |
+Issue_interval cycle|            |---------|       |  Pipeline registers to
+to model instruction|----------> |         | 2     |- model instruction latency
+throughput          |            |---------|       |
+                    |----------> |         | 1     |
+                    |            |---------|       |
+                    |----------> |         | 0   --|
+Dispatch position =              |---------|
+Latency - Issue_interval             |
+                                    \|/
+                                m_result_port
+```
+/////////////////////////////////////////////////////////////////////////////////////////
 */
 void shader_core_ctx::issue() {
   // Ensure fair round robin issu between schedulers
