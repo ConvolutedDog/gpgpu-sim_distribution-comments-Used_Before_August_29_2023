@@ -1838,7 +1838,10 @@ class shader_core_config : public core_config {
 };
 
 /*
-
+struct shader_core_stats_pod 是一个用于记录GPU核心统计信息的结构体，在GPGPU-Sim模拟器中扮演重要
+角色。在GPGPU-Sim中，struct shader_core_stats_pod 记录了每个GPU核心的处理器时间、指令执行数、存
+储器访问数，以及其他有关GPU核心性能和资源使用情况的信息。这些信息可以用于评估GPU核心的性能、检测潜
+在的瓶颈问题和优化GPU核心的配置。
 */
 struct shader_core_stats_pod {
   void *
@@ -2312,16 +2315,16 @@ class shader_core_ctx : public core_t {
     m_stats->m_active_exu_warps[m_sid]++;
   }
   void incimul24_stat(unsigned active_count,double latency) {
-  if(m_config->gpgpu_clock_gated_lanes==false){
-    m_stats->m_num_imul24_acesses[m_sid]=m_stats->m_num_imul24_acesses[m_sid]+(double)active_count*latency
+    if(m_config->gpgpu_clock_gated_lanes==false){
+      m_stats->m_num_imul24_acesses[m_sid]=m_stats->m_num_imul24_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_nonsfu(active_count, latency);
     }else {
       m_stats->m_num_imul24_acesses[m_sid]=m_stats->m_num_imul24_acesses[m_sid]+(double)active_count*latency;
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;    
-   }
-   void incimul32_stat(unsigned active_count,double latency) {
+  }
+  void incimul32_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_imul32_acesses[m_sid]=m_stats->m_num_imul32_acesses[m_sid]+(double)active_count*latency
          + inactive_lanes_accesses_sfu(active_count, latency);          
@@ -2331,7 +2334,7 @@ class shader_core_ctx : public core_t {
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
   }
-   void incidiv_stat(unsigned active_count,double latency) {
+  void incidiv_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_idiv_acesses[m_sid]=m_stats->m_num_idiv_acesses[m_sid]+(double)active_count*latency
          + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2341,28 +2344,28 @@ class shader_core_ctx : public core_t {
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;    
   }
-   void incfpalu_stat(unsigned active_count,double latency) {
+  void incfpalu_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_fp_acesses[m_sid]=m_stats->m_num_fp_acesses[m_sid]+(double)active_count*latency
          + inactive_lanes_accesses_nonsfu(active_count, latency);
     }else {
-    m_stats->m_num_fp_acesses[m_sid]=m_stats->m_num_fp_acesses[m_sid]+(double)active_count*latency;
+      m_stats->m_num_fp_acesses[m_sid]=m_stats->m_num_fp_acesses[m_sid]+(double)active_count*latency;
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;     
   }
-   void incfpmul_stat(unsigned active_count,double latency) {
+  void incfpmul_stat(unsigned active_count,double latency) {
               // printf("FP MUL stat increament\n");
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_fpmul_acesses[m_sid]=m_stats->m_num_fpmul_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_nonsfu(active_count, latency);
     }else {
-    m_stats->m_num_fpmul_acesses[m_sid]=m_stats->m_num_fpmul_acesses[m_sid]+(double)active_count*latency;
+      m_stats->m_num_fpmul_acesses[m_sid]=m_stats->m_num_fpmul_acesses[m_sid]+(double)active_count*latency;
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
-   void incfpdiv_stat(unsigned active_count,double latency) {
+  }
+  void incfpdiv_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_fpdiv_acesses[m_sid]=m_stats->m_num_fpdiv_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2371,29 +2374,29 @@ class shader_core_ctx : public core_t {
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
-   void incdpalu_stat(unsigned active_count,double latency) {
+  }
+  void incdpalu_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_dp_acesses[m_sid]=m_stats->m_num_dp_acesses[m_sid]+(double)active_count*latency
          + inactive_lanes_accesses_nonsfu(active_count, latency);
     }else {
-    m_stats->m_num_dp_acesses[m_sid]=m_stats->m_num_dp_acesses[m_sid]+(double)active_count*latency;
+      m_stats->m_num_dp_acesses[m_sid]=m_stats->m_num_dp_acesses[m_sid]+(double)active_count*latency;
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++; 
-   }
-   void incdpmul_stat(unsigned active_count,double latency) {
+  }
+  void incdpmul_stat(unsigned active_count,double latency) {
               // printf("FP MUL stat increament\n");
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_dpmul_acesses[m_sid]=m_stats->m_num_dpmul_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_nonsfu(active_count, latency);
     }else {
-    m_stats->m_num_dpmul_acesses[m_sid]=m_stats->m_num_dpmul_acesses[m_sid]+(double)active_count*latency;
+      m_stats->m_num_dpmul_acesses[m_sid]=m_stats->m_num_dpmul_acesses[m_sid]+(double)active_count*latency;
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
-   void incdpdiv_stat(unsigned active_count,double latency) {
+  }
+  void incdpdiv_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_dpdiv_acesses[m_sid]=m_stats->m_num_dpdiv_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2402,9 +2405,9 @@ class shader_core_ctx : public core_t {
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
+  }
 
-   void incsqrt_stat(unsigned active_count,double latency) {
+  void incsqrt_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_sqrt_acesses[m_sid]=m_stats->m_num_sqrt_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2413,9 +2416,9 @@ class shader_core_ctx : public core_t {
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
+  }
 
-   void inclog_stat(unsigned active_count,double latency) {
+  void inclog_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_log_acesses[m_sid]=m_stats->m_num_log_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2424,9 +2427,9 @@ class shader_core_ctx : public core_t {
     }
     m_stats->m_active_exu_threads[m_sid]+=active_count;
     m_stats->m_active_exu_warps[m_sid]++;
-   }
+  }
 
-   void incexp_stat(unsigned active_count,double latency) {
+  void incexp_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_exp_acesses[m_sid]=m_stats->m_num_exp_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2437,7 +2440,7 @@ class shader_core_ctx : public core_t {
     m_stats->m_active_exu_warps[m_sid]++;
   }
 
-   void incsin_stat(unsigned active_count,double latency) {
+  void incsin_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_sin_acesses[m_sid]=m_stats->m_num_sin_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
@@ -2449,7 +2452,7 @@ class shader_core_ctx : public core_t {
   }
 
 
-   void inctensor_stat(unsigned active_count,double latency) {
+  void inctensor_stat(unsigned active_count,double latency) {
     if(m_config->gpgpu_clock_gated_lanes==false){
       m_stats->m_num_tensor_core_acesses[m_sid]=m_stats->m_num_tensor_core_acesses[m_sid]+(double)active_count*latency
         + inactive_lanes_accesses_sfu(active_count, latency); 
