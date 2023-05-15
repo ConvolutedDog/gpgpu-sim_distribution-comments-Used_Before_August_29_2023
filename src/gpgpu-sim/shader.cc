@@ -1174,6 +1174,29 @@ simt_stack::update()被更新。另外，在这个函数中，由于barrier的�
 Registers()保留，以便以后被记分牌算法使用。scheduler_unit::m_sp_out,scheduler_unit::m_sfu_out, 
 scheduler_unit::m_mem_out指向SP、SFU和Mem流水线接收的发射阶段和执行阶段之间的第一个流水线寄存器。
 这就是为什么在使用shader_core_ctx::issue_warp()向其相应的流水线发出任何指令之前要检查它们。
+
+单条指令的吞吐和延迟
+在每个pipelined_simd_unit中，issue()成员函数将给定的流水线寄存器的内容移入m_dispatch_reg。然后指
+令在m_dispatch_reg等待initiation_interval个周期。在此期间，没有其他的指令可以发到这个单元，所以这
+个等待是指令的吞吐量的模型。等待之后，指令被派发到内部流水线寄存器m_pipeline_reg进行延迟建模。派遣
+的位置是确定的，所以在m_dispatch_reg中花费的时间也被计入延迟中。每个周期，指令将通过流水线寄存器前
+进，最终进入m_result_port，这是共享的流水线寄存器，通向SP和SFU单元的共同写回阶段。示意图：
+
+              m_dispatch_reg    m_pipeline_reg      
+                  / |            |---------|
+                 /  |----------> |         | 31  --|
+                /   |            |---------|       |
+Dispatch done every |----------> |         | :     |
+Issue_interval cycle|            |---------|       |  Pipeline registers to
+to model instruction|----------> |         | 2     |- model instruction latency
+throughput          |            |---------|       |
+                    |----------> |         | 1     |
+                    |            |---------|       |
+                    |----------> |         | 0   --|
+Dispatch position =              |---------|
+Latency - Issue_interval             |
+                                    \|/
+                                m_result_port --> 写回
 */
 void shader_core_ctx::issue() {
   // Ensure fair round robin issu between schedulers
@@ -1945,7 +1968,7 @@ void shader_core_ctx::warp_inst_complete(const warp_inst_t &inst) {
 }
 
 /*
-
+流水线的写回阶段。将执行阶段的结果写回到寄存器文件中。
 */
 void shader_core_ctx::writeback() {
   unsigned max_committed_thread_instructions =
@@ -4603,7 +4626,7 @@ unsigned simt_core_cluster::get_n_active_sms() const {
 }
 
 /*
-对所有SIMT Core集群遍历，选择每个集群内的一个SIMT Core，向其发射一个内核。
+对所有SIMT Core集群遍历，选择每个集群内的一个SIMT Core，向其发射一个线程块。
 */
 unsigned simt_core_cluster::issue_block2core() {
   //当前SIMT Core集群发射的线程块的计数。
