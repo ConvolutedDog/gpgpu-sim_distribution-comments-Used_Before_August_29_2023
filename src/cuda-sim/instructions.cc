@@ -3827,9 +3827,15 @@ void decode_space(memory_space_t &space, ptx_thread_info *thread,
 }
 
 void ld_exec(const ptx_instruction *pI, ptx_thread_info *thread) {
+  //获取目的操作数。
   const operand_info &dst = pI->dst();
+  //获取源操作数。
   const operand_info &src1 = pI->src1();
 
+  //获取加载的数据的类型。例如：
+  //ld.global.nc.v4.f32 {%f271, %f270, %f269, %f268}, [%rd2];的类型为F32_TYPE。
+  //ld.param.u64 %rd9, [_Z5SgemmILi128ELi8ELi128ELi8ELi8ELb0EEvPfS0_S0_iii_param_0];的类型为U64_TYPE。
+  //ld.global.nc.v4.u32 {%r76, %r77, %r78, %r79}, [%rd13];的类型为U32_TYPE。
   unsigned type = pI->get_type();
 
   ptx_reg_t src1_data = thread->get_operand_value(src1, dst, type, thread, 1);
