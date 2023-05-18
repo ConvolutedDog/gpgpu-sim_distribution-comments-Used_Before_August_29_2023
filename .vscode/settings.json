@@ -68,7 +68,8 @@
         "cfenv": "cpp",
         "variant": "cpp",
         "bit": "cpp",
-        "*.def": "cpp"
+        "*.def": "cpp",
+        "*.ipp": "cpp"
     },
     "editor.tokenColorCustomizations": {
         "textMateRules": [
