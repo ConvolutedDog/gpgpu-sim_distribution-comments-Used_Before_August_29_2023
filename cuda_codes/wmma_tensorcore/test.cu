@@ -40,9 +40,9 @@ using namespace nvcuda;
 __host__ void InitMatrix(half *A, half *B, float *C)
 {
 	for (int i = 0; i < M_TOTAL*K_TOTAL; i++)
-		A[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
+		A[i] = __float2half(i / 13);//A[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
 	for (int i = 0; i < K_TOTAL*N_TOTAL; i++)
-		B[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
+		B[i] = __float2half(i / 14);//B[i] = __float2half(0.1);//__float2half(rand() % 1000 / 1000.0f);
 	for (int i = 0; i < M_TOTAL*N_TOTAL; i++)
 		C[i] = 0.1;//rand() % 1000 / 1000.0f;
 #if (print_matrices==1)
