@@ -4065,7 +4065,7 @@ void mma_ld_impl(const ptx_instruction *pI, core_t *core, warp_inst_t &inst) {
 
     decode_space(space, thread, src1, mem, addr);
     type_info_key::type_decode(type, size, t);
-    printf("read length: %d\n", size);
+    // printf("read length: %d\n", size);
 
     ptx_reg_t data[16];
     if (core->get_gpu()->gpgpu_ctx->debug_tensorcore)
