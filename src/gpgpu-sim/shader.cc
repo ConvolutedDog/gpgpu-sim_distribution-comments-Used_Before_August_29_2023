@@ -916,6 +916,14 @@ void shader_core_ctx::decode() {
     const warp_inst_t *pI1 = get_next_inst(m_inst_fetch_buffer.m_warp_id, pc);
     //将一条新指令存入I-Bufer。I-Buffer有两个槽，pI1加入槽0，pI2加入槽1。
     m_warp[m_inst_fetch_buffer.m_warp_id]->ibuffer_fill(0, pI1);
+    /***********************************************************************/
+    /* NOTE: The following code is for debugging purposes only.            */
+    if (_CALIBRATION_LOG_ && m_sid == 0) {
+      std::cout << "    DECODE: ("
+                << m_inst_fetch_buffer.m_warp_id << ", "
+                << pc << std::endl;
+    }
+    /***********************************************************************/
     //增加在流水线中执行的指令数。
     m_warp[m_inst_fetch_buffer.m_warp_id]->inc_inst_in_pipeline();
     if (pI1) {
@@ -932,6 +940,14 @@ void shader_core_ctx::decode() {
           get_next_inst(m_inst_fetch_buffer.m_warp_id, pc + pI1->isize);
       if (pI2) {
         m_warp[m_inst_fetch_buffer.m_warp_id]->ibuffer_fill(1, pI2);
+        /***********************************************************************/
+        /* NOTE: The following code is for debugging purposes only.            */
+        if (_CALIBRATION_LOG_ && m_sid == 0) {
+          std::cout << "    DECODE: ("
+                    << m_inst_fetch_buffer.m_warp_id << ", "
+                    << pc + pI1->isize << std::endl;
+        }
+        /***********************************************************************/
         m_warp[m_inst_fetch_buffer.m_warp_id]->inc_inst_in_pipeline();
         m_stats->m_num_decoded_insn[m_sid]++;
         if ((pI1->oprnd_type == INT_OP) || (pI1->oprnd_type == UN_OP))  { 
@@ -989,6 +1005,14 @@ void shader_core_ctx::fetch() {
                                     // were expecting.
       //设置指示缓冲区内的指令有效。
       m_inst_fetch_buffer.m_valid = true;
+      /***********************************************************************/
+      /* NOTE: The following code is for debugging purposes only.            */
+      if (_CALIBRATION_LOG_ && m_sid == 0) {
+        std::cout << "    FETCH: ("
+                  << mf->get_wid() << ", "
+                  << m_warp[mf->get_wid()]->get_pc() << std::endl;
+      }
+      /***********************************************************************/
       //设置上次取指的时钟周期。
       m_warp[mf->get_wid()]->set_last_fetch(m_gpu->gpu_sim_cycle);
       delete mf;
@@ -1104,6 +1128,14 @@ void shader_core_ctx::fetch() {
           } else if (status == HIT) {
             m_last_warp_fetched = warp_id;
             m_inst_fetch_buffer = ifetch_buffer_t(pc, nbytes, warp_id);
+            /***********************************************************************/
+            /* NOTE: The following code is for debugging purposes only.            */
+            if (_CALIBRATION_LOG_ && m_sid == 0) {
+              std::cout << "    FETCH: ("
+                        << mf->get_wid() << ", "
+                        << m_warp[mf->get_wid()]->get_pc() << std::endl;
+            }
+            /***********************************************************************/
             m_warp[warp_id]->set_last_fetch(m_gpu->gpu_sim_cycle);
             delete mf;
           } else {
@@ -1146,6 +1178,15 @@ void shader_core_ctx::issue_warp(register_set &pipe_reg_set,
                      m_gpu->gpu_tot_sim_cycle + m_gpu->gpu_sim_cycle,
                      m_warp[warp_id]->get_dynamic_warp_id(),
                      sch_id);  // dynamic instruction information
+  /***********************************************************************/
+  /* NOTE: The following code is for debugging purposes only.            */
+  if (_CALIBRATION_LOG_ && m_sid == 0) {
+    std::cout << "    ISSUE: ("
+              << warp_id << ", "
+              << (*pipe_reg)->pc << std::endl;
+  }
+  /***********************************************************************/
+
   m_stats->shader_cycle_distro[2 + (*pipe_reg)->active_count()]++;
   func_exec_inst(**pipe_reg);
 
@@ -2129,6 +2170,14 @@ void shader_core_ctx::writeback() {
     m_scoreboard->releaseRegisters(pipe_reg);
     m_warp[warp_id]->dec_inst_in_pipeline();
     warp_inst_complete(*pipe_reg);
+    /***********************************************************************/
+    /* NOTE: The following code is for debugging purposes only.            */
+    if (_CALIBRATION_LOG_ && get_sid() == 0) {
+      std::cout << "    Write back: ("
+                << pipe_reg->warp_id() << ", "
+                << pipe_reg->pc << " ldst" << std::endl;
+    }
+    /***********************************************************************/
     m_gpu->gpu_sim_insn_last_update_sid = m_sid;
     m_gpu->gpu_sim_insn_last_update = m_gpu->gpu_sim_cycle;
     m_last_inst_gpu_sim_cycle = m_gpu->gpu_sim_cycle;
@@ -2702,6 +2751,14 @@ pipelined_simd_unit::pipelined_simd_unit(register_set *result_port,
 
 void pipelined_simd_unit::cycle() {
   if (!m_pipeline_reg[0]->empty()) {
+    /***********************************************************************/
+    /* NOTE: The following code is for debugging purposes only.            */
+    if (_CALIBRATION_LOG_ && m_core->get_sid() == 0) {
+      std::cout << "    Execute: ("
+                << m_pipeline_reg[0]->warp_id() << ", "
+                << m_pipeline_reg[0]->pc << std::endl;
+    }
+    /***********************************************************************/
     m_result_port->move_in(m_pipeline_reg[0]);
     assert(active_insts_in_pipeline > 0);
     active_insts_in_pipeline--;
@@ -2849,11 +2906,27 @@ void ldst_unit::writeback() {
               m_scoreboard->releaseRegister(m_next_wb.warp_id(),
                                             m_next_wb.out[r]);
               insn_completed = true;
+              /***********************************************************************/
+              /* NOTE: The following code is for debugging purposes only.            */
+              if (_CALIBRATION_LOG_ && m_core->get_sid() == 0) {
+                std::cout << "    Execute: ("
+                          << m_next_wb.warp_id() << ", "
+                          << m_next_wb.pc << " ldst" << std::endl;
+              }
+              /***********************************************************************/
             }
           } else {  // shared
             m_scoreboard->releaseRegister(m_next_wb.warp_id(),
                                           m_next_wb.out[r]);
             insn_completed = true;
+            /***********************************************************************/
+            /* NOTE: The following code is for debugging purposes only.            */
+            if (_CALIBRATION_LOG_ && m_core->get_sid() == 0) {
+              std::cout << "    Execute: ("
+                        << m_next_wb.warp_id() << ", "
+                        << m_next_wb.pc << " ldst" << std::endl;
+            }
+            /***********************************************************************/
           }
         }
       }
@@ -3816,7 +3889,11 @@ Shader Core/SIMT Core向前推进一个时钟周期。
 void shader_core_ctx::cycle() {
   //如果这个SIMT Core处于非活跃状态，且已经执行完成，时钟周期不向前推进。
   if (!isactive() && get_not_completed() == 0) return;
-
+  if (_CALIBRATION_LOG_ && get_sid() == 0) {
+    std::cout << " # cycle: " 
+              << m_gpu->gpu_sim_cycle + m_gpu->gpu_tot_sim_cycle 
+              << std::endl;
+  }
   m_stats->shader_cycles[m_sid]++;
   //每个内核时钟周期，shader_core_ctx::cycle()都被调用，以模拟SIMT Core的一个周期。这个函数调用一
   //组成员函数，按相反的顺序模拟内核的流水线阶段，以模拟流水线效应：
@@ -4640,6 +4717,14 @@ bool opndcoll_rfu_t::collector_unit_t::allocate(register_set *pipeline_reg_set,
 
 void opndcoll_rfu_t::collector_unit_t::dispatch() {
   assert(m_not_ready.none());
+  /***********************************************************************/
+  /* NOTE: The following code is for debugging purposes only.            */
+  if (_CALIBRATION_LOG_ && m_rfu->shader_core()->get_sid() == 0) {
+    std::cout << "    Read Operands: ("
+              << get_warp_id() << ", "
+              << m_warp->pc << std::endl;
+  }
+  /***********************************************************************/
   m_output_register->move_in(m_sub_core_model, m_reg_id, m_warp);
   m_free = true;
   m_output_register = NULL;
